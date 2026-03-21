@@ -34,6 +34,11 @@ const CANNON_LEN      = 14;     // cannon arm length in cells
 const PROJECTILE_R    = 2;      // projectile visual radius (px)
 const STARTING_MONEY  = 200;    // € each player starts with
 const TOP_ESCAPE_LIMIT = GRID_H * 8;
+const CLUSTER_FRAGMENT_MIN_SPEED = 2.1;
+const CLUSTER_FRAGMENT_SPEED_RANGE = 0.9;
+const ACID_SPLASH_MIN_RADIUS = 6;
+const ACID_SPLASH_RADIUS_VARIANCE = 16;
+const ACID_DECAY_NEIGHBOR_PROBABILITY = 0.6;
 
 // Player colors (body, highlight)
 const PLAYER_PALETTE = [
@@ -461,7 +466,7 @@ class Projectile {
       this.splitted = true;
       for (let i = 0; i < 7; i++) {
         const ang = (-Math.PI * 0.75) + (i / 6) * (Math.PI * 1.5);
-        const spd = 2.1 + Math.random() * 0.9;
+        const spd = CLUSTER_FRAGMENT_MIN_SPEED + Math.random() * CLUSTER_FRAGMENT_SPEED_RANGE;
         const fvx = Math.cos(ang) * spd;
         const fvy = Math.sin(ang) * spd * 0.7;
         projectiles.push(new Projectile(this.ownerId, this.x, this.y, fvx, fvy, 'clusterFragment'));
@@ -541,7 +546,7 @@ function triggerWeaponEffect(ownerId, weaponKey, gx, gy) {
       const count = 55;
       for (let i = 0; i < count; i++) {
         const ang = (Math.random() * Math.PI * 2);
-        const r   = 6 + Math.random() * 16;
+        const r   = ACID_SPLASH_MIN_RADIUS + Math.random() * ACID_SPLASH_RADIUS_VARIANCE;
         const ax  = Math.round(gx + Math.cos(ang) * r);
         const ay  = Math.round(gy + Math.sin(ang) * r * 0.5);
         if (ax >= 0 && ax < GRID_W && ay >= 0 && ay < GRID_H)
@@ -710,7 +715,9 @@ function updateAcidDamage() {
           dealDamage(null, p.id, ACID_DAMAGE);
           setCell(gx, gy, EMPTY); // acid decays after burning a player
           // consume a little nearby acid too for faster cleanup
-          if (Math.random() < 0.6) setCell(gx + (Math.random() < 0.5 ? -1 : 1), gy, EMPTY);
+          if (Math.random() < ACID_DECAY_NEIGHBOR_PROBABILITY) {
+            setCell(gx + (Math.random() < 0.5 ? -1 : 1), gy, EMPTY);
+          }
           hit = true;
         }
       }
@@ -1454,7 +1461,6 @@ function bindLobbyEvents() {
         myConnectionIdx = res.idx;
         myLocalCount = local;
         myPlayerIndices = [];
-        for (let i = 0; i < local; i++) myPlayerIndices.push(res.idx + i);
         setRoomStatus(`Room created: ${res.code}  |  Waiting for players...`, 'ok');
         updateRoomPlayerList(res.players);
         DOM.btnStartOnline.style.display = '';
@@ -1477,7 +1483,6 @@ function bindLobbyEvents() {
         myConnectionIdx = res.idx;
         myLocalCount = local;
         myPlayerIndices = [];
-        for (let i = 0; i < local; i++) myPlayerIndices.push(res.idx + i);
         setRoomStatus(`Joined room ${code}  |  Waiting for host to start...`, 'ok');
         updateRoomPlayerList(res.players);
       } else {
