@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Feuerpanzerkampf</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════ LOBBY ═══════════════════════════ -->
+<div id="lobby">
+  <h1>⚔️ Feuerpanzerkampf</h1>
+  <h2>Artillery &amp; Sand Physics</h2>
+
+  <!-- Local game setup -->
+  <div class="lobby-section">
+    <h3>🎮 Local Game</h3>
+    <label>Number of players (1–6)</label>
+    <input type="number" id="num-players" value="2" min="1" max="6">
+
+    <div id="player-name-fields" class="player-names"></div>
+
+    <div class="flex-row" style="margin-top:10px">
+      <button class="btn btn-primary" id="btn-local">Start Local Game</button>
+    </div>
+  </div>
+
+  <!-- Online multiplayer -->
+  <div class="lobby-section">
+    <h3>🌐 Online Multiplayer</h3>
+    <div class="player-names">
+      <div>
+        <label>Your name</label>
+        <input type="text" id="online-name" value="Tank Commander" maxlength="18">
+      </div>
+      <div>
+        <label>Local players on this PC (1–2)</label>
+        <input type="number" id="online-local" value="1" min="1" max="2">
+      </div>
+    </div>
+    <div class="flex-row">
+      <button class="btn btn-secondary" id="btn-create">Create Room</button>
+      <div>
+        <input type="text" id="room-code-input" placeholder="ROOM CODE" maxlength="4"
+               style="width:120px;text-transform:uppercase">
+        <button class="btn btn-secondary btn-sm" id="btn-join">Join</button>
+      </div>
+    </div>
+    <div id="room-status"></div>
+    <div id="waiting-panel" class="hidden" style="margin-top:12px">
+      <div style="color:#aaa;font-size:0.85rem;margin-bottom:8px">Players in room:</div>
+      <div id="room-players-list" style="font-size:0.85rem;color:#ccc;margin-bottom:10px"></div>
+      <button class="btn btn-primary" id="btn-start-online">Start Game</button>
+    </div>
+  </div>
+
+  <!-- Controls reference -->
+  <div class="lobby-section">
+    <h3>⌨️ Controls</h3>
+    <div style="font-size:0.8rem;color:#aaa;line-height:1.8">
+      <b style="color:#ccc">Player 1:</b> A/D = rotate cannon &nbsp;|&nbsp; Hold SPACE = charge &amp; release = fire &nbsp;|&nbsp; Q/E = prev/next weapon<br>
+      <b style="color:#ccc">Player 2:</b> ←/→ = rotate cannon &nbsp;|&nbsp; Hold ENTER = charge &amp; release = fire &nbsp;|&nbsp; Z/X = prev/next weapon<br>
+      <b style="color:#ccc">General:</b> ESC = pause / open shop between rounds
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════ GAME SCREEN ════════════════════════ -->
+<div id="game-screen" class="hidden">
+  <!-- HUD -->
+  <div id="hud"></div>
+
+  <!-- Main canvas -->
+  <canvas id="canvas" width="1200" height="600"></canvas>
+
+  <!-- Controls hint bar -->
+  <div id="controls-help">
+    <span>P1: A/D rotate · SPACE charge+fire · Q/E weapon</span>
+    <span>P2: ←/→ rotate · ENTER charge+fire · Z/X weapon</span>
+  </div>
+
+  <!-- Power bar (floating) -->
+  <div id="power-bar-container" class="hidden">
+    <div id="power-label">POWER</div>
+    <div id="power-bar-bg"><div id="power-bar-fill"></div></div>
+  </div>
+
+  <!-- Round / winner banner -->
+  <div id="round-banner" class="hidden"></div>
+
+  <!-- Generic message overlay -->
+  <div id="msg-overlay">
+    <div id="msg-box" class="hidden">
+      <h2 id="msg-title"></h2>
+      <p  id="msg-body"></p>
+    </div>
+  </div>
+
+  <!-- Shop modal -->
+  <div id="shop-modal" class="hidden">
+    <div class="shop-box">
+      <h2>🛒 Armory Shop</h2>
+      <div class="shop-balance" id="shop-balance-text"></div>
+      <div class="shop-items" id="shop-items"></div>
+      <div id="shop-nav" class="flex-row">
+        <button class="btn btn-primary" id="btn-shop-done">Done → Next Round</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
