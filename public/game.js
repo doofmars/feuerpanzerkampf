@@ -18,6 +18,8 @@ const EMPTY   = 0;
 const TERRAIN = 1;
 const ACID    = 2;
 const SNOW    = 3;
+const BEDROCK = 4;
+const GRASS   = 5;
 
 // Physics
 const GRAVITY         = 0.18;   // cells/frame² normal
@@ -31,6 +33,7 @@ const TANK_H_CELLS    = 6;      // tank body height in grid cells
 const CANNON_LEN      = 14;     // cannon arm length in cells
 const PROJECTILE_R    = 2;      // projectile visual radius (px)
 const STARTING_MONEY  = 200;    // € each player starts with
+const TOP_ESCAPE_LIMIT = GRID_H * 8;
 
 // Player colors (body, highlight)
 const PLAYER_PALETTE = [
@@ -52,19 +55,19 @@ const WEAPONS = {
   },
   rocket: {
     name:'Rocket', icon:'🚀', cost:10, unlimited:false,
-    type:'ballistic', gravity:GRAVITY, powerScale:1.0,
+    type:'ballistic', gravity:GRAVITY, powerScale:1.25,
     explodeR:26, damage:200, terrainDamage:true,
     desc:'Arc · large explosion',
   },
   acidbomb: {
     name:'Acid Bomb', icon:'☣️', cost:20, unlimited:false,
-    type:'ballistic', gravity:GRAVITY, powerScale:1.0,
+    type:'ballistic', gravity:GRAVITY, powerScale:0.85,
     explodeR:10, damage:50, terrainDamage:true,
     desc:'Splash acid particles',
   },
   snowball: {
     name:'Snow Ball', icon:'❄️', cost:15, unlimited:false,
-    type:'ballistic', gravity:GRAVITY, powerScale:1.0,
+    type:'ballistic', gravity:GRAVITY, powerScale:0.9,
     explodeR:0, damage:0, terrainDamage:false,
     desc:'Creates blocking snow sphere',
   },
@@ -80,8 +83,20 @@ const WEAPONS = {
     explodeR:0, damage:200, terrainDamage:true,
     desc:'Instant beam · shreds terrain',
   },
+  clusterbomb: {
+    name:'Cluster Bomb', icon:'🧨', cost:80, unlimited:false,
+    type:'cluster', gravity:GRAVITY, powerScale:1.0,
+    explodeR:0, damage:0, terrainDamage:false,
+    desc:'Splits mid-air into mini bombs',
+  },
+  clusterFragment: {
+    name:'Cluster Fragment', icon:'·', cost:0, unlimited:false,
+    type:'ballistic', gravity:GRAVITY, powerScale:1.0,
+    explodeR:10, damage:90, terrainDamage:true,
+    desc:'Internal',
+  },
 };
-const WEAPON_ORDER = ['cannonball','rocket','acidbomb','snowball','gunshot','laser'];
+const WEAPON_ORDER = ['cannonball','rocket','acidbomb','snowball','gunshot','laser','clusterbomb'];
 
 // ══════════════════════════════════════════════════════════════
 //  STATE
@@ -117,7 +132,10 @@ let socket = null;
 let isOnline = false;
 let isHost   = false;
 let myPlayerIndices = [];   // which players I control locally
+let myConnectionIdx = 0;
+let myLocalCount = 1;
 let roomCode = '';
+let unlimitedAmmoMode = false;
 
 // DOM refs
 const DOM = {};
@@ -128,7 +146,9 @@ const DOM = {};
 function idx(x, y) { return y * GRID_W + x; }
 
 function getCell(x, y) {
-  if (x < 0 || x >= GRID_W || y < 0 || y >= GRID_H) return TERRAIN; // treat OOB as solid
+  if (x < 0 || x >= GRID_W) return TERRAIN; // side walls solid
+  if (y < 0) return EMPTY;                  // open sky ceiling
+  if (y >= GRID_H) return TERRAIN;          // floor solid
   return terrain[idx(x, y)];
 }
 
@@ -142,9 +162,17 @@ function setCell(x, y, v) {
 function cellColorRGB(type, x, y) {
   const h = ((x * 73 ^ y * 137) & 0x1F);
   switch (type) {
+    case GRASS: {
+      const v = h & 0xF;
+      return [58 + v, 140 + v, 52 + (v >> 1)];
+    }
     case TERRAIN: {
       const v = h - 16;  // -16..+15
-      return [110 + v, 72 + (v >> 1), 22 + (v >> 2)];
+      return [120 + (v >> 1), 82 + (v >> 1), 34 + (v >> 2)];
+    }
+    case BEDROCK: {
+      const v = h - 16;
+      return [72 + (v >> 1), 72 + (v >> 1), 78 + (v >> 1)];
     }
     case ACID: {
       const v = h & 0xF;
@@ -174,7 +202,7 @@ function generateTerrain(seed) {
   }
 
   const heights = new Float32Array(GRID_W);
-  const base = GRID_H * 0.62;
+  const base = GRID_H * 0.68;
   const A = [45, 28, 16, 9, 5];
   const F = [0.012, 0.025, 0.05, 0.1, 0.19];
   const P = Array.from({length:5}, () => rand() * Math.PI * 2);
@@ -183,7 +211,7 @@ function generateTerrain(seed) {
     let h = base;
     for (let i = 0; i < A.length; i++) h += A[i] * Math.sin(x * F[i] + P[i]);
     h += (rand() - 0.5) * 7;
-    heights[x] = Math.max(GRID_H * 0.28, Math.min(GRID_H * 0.88, h));
+    heights[x] = Math.max(GRID_H * 0.38, Math.min(GRID_H * 0.93, h));
   }
   // Smooth
   for (let pass = 0; pass < 4; pass++) {
@@ -195,7 +223,9 @@ function generateTerrain(seed) {
   for (let x = 0; x < GRID_W; x++) {
     const surf = Math.floor(heights[x]);
     for (let y = surf; y < GRID_H; y++) {
-      terrain[idx(x,y)] = TERRAIN;
+      if (y === surf) terrain[idx(x,y)] = GRASS;
+      else if (y >= GRID_H - 18) terrain[idx(x,y)] = BEDROCK;
+      else terrain[idx(x,y)] = TERRAIN;
       colorSeed[idx(x,y)] = Math.floor(rand() * 32);
     }
   }
@@ -294,6 +324,23 @@ function updateSandPhysics() {
           terrainDirty = true;
         }
       }
+
+      // Extra lateral flow for acid when resting on solid ground
+      if (cell === ACID && terrain[idx(gx, gy+1)] !== EMPTY) {
+        const left = gx - 1, right = gx + 1;
+        const chooseLeft = ((gx + gy + frameCount) & 1) === 0;
+        const nxA = chooseLeft ? left : right;
+        const nxB = chooseLeft ? right : left;
+        if (nxA >= 0 && nxA < GRID_W && terrain[idx(nxA, gy)] === EMPTY) {
+          terrain[idx(nxA, gy)] = ACID;
+          terrain[idx(gx, gy)] = EMPTY;
+          terrainDirty = true;
+        } else if (nxB >= 0 && nxB < GRID_W && terrain[idx(nxB, gy)] === EMPTY) {
+          terrain[idx(nxB, gy)] = ACID;
+          terrain[idx(gx, gy)] = EMPTY;
+          terrainDirty = true;
+        }
+      }
     }
   }
 
@@ -321,15 +368,29 @@ class Player {
     this.charging  = false;
     this.canShoot  = true;
     this.alive     = true;
-    this.weapons   = { cannonball: Infinity };
-    WEAPON_ORDER.slice(1).forEach(w => { this.weapons[w] = 0; });
+    this.weapons   = {
+      cannonball: Infinity,
+      rocket: 5,
+      acidbomb: 1,
+      snowball: 3,
+      gunshot: 3,
+      laser: 0,
+      clusterbomb: 0,
+    };
     this.weaponIdx = 0;      // index into WEAPON_ORDER
   }
 
   get currentWeaponKey() { return WEAPON_ORDER[this.weaponIdx]; }
 
   snapToTerrain() {
-    const surf = groundY(this.gx);
+    let surf = GRID_H - 1;
+    for (let y = 0; y < GRID_H; y++) {
+      const c = terrain[idx(this.gx, y)];
+      if (c === TERRAIN || c === BEDROCK || c === GRASS) {
+        surf = y;
+        break;
+      }
+    }
     this.gy = surf - TANK_H_CELLS;
     if (this.gy < 0) this.gy = 0;
   }
@@ -362,23 +423,49 @@ class Projectile {
     this.weaponKey = weaponKey;
     this.alive     = true;
     this.trail     = [];   // [{x,y}] last N positions
+    this.age       = 0;
+    this.splitted  = false;
   }
 
   update() {
     this.trail.push({x: this.x, y: this.y});
     if (this.trail.length > 12) this.trail.shift();
+    this.age++;
 
     this.x  += this.vx;
     this.y  += this.vy;
     this.vy += this.weapon.gravity;
 
-    // Out of bounds
-    if (this.x < 0 || this.x >= GRID_W || this.y >= GRID_H) {
+    // Side walls are solid
+    if (this.x < 0 || this.x >= GRID_W) {
+      this.alive = false;
+      triggerWeaponEffect(this.ownerId, this.weaponKey, this.x, Math.max(0, this.y));
+      onProjectileResolved(this.ownerId);
+      return;
+    }
+    // Bottom boundary explodes on floor impact
+    if (this.y >= GRID_H - 1) {
+      this.alive = false;
+      triggerWeaponEffect(this.ownerId, this.weaponKey, this.x, GRID_H - 1);
+      onProjectileResolved(this.ownerId);
+      return;
+    }
+    // Open ceiling: projectiles can leave and come back down
+    if (this.y < -TOP_ESCAPE_LIMIT) {
       this.alive = false;
       onProjectileResolved(this.ownerId);
       return;
     }
-    if (this.y < -GRID_H) {
+
+    if (this.weaponKey === 'clusterbomb' && !this.splitted && this.age >= 26) {
+      this.splitted = true;
+      for (let i = 0; i < 7; i++) {
+        const ang = (-Math.PI * 0.75) + (i / 6) * (Math.PI * 1.5);
+        const spd = 2.1 + Math.random() * 0.9;
+        const fvx = Math.cos(ang) * spd;
+        const fvy = Math.sin(ang) * spd * 0.7;
+        projectiles.push(new Projectile(this.ownerId, this.x, this.y, fvx, fvy, 'clusterFragment'));
+      }
       this.alive = false;
       onProjectileResolved(this.ownerId);
       return;
@@ -387,7 +474,7 @@ class Projectile {
     // Collision with terrain (TERRAIN or SNOW block projectiles; ACID does not)
     const gx = Math.round(this.x), gy = Math.round(this.y);
     const cell = getCell(gx, gy);
-    if (cell === TERRAIN || cell === SNOW) {
+    if (cell !== EMPTY && cell !== ACID) {
       this.alive = false;
       triggerWeaponEffect(this.ownerId, this.weaponKey, this.x, this.y);
       onProjectileResolved(this.ownerId);
@@ -450,14 +537,13 @@ function triggerWeaponEffect(ownerId, weaponKey, gx, gy) {
       break;
 
     case 'acidbomb': {
-      // Small explosion + acid splash
-      explode(ownerId, gx, gy, w.explodeR, w.damage);
+      // No explosion: just an acid splash cloud
       const count = 55;
       for (let i = 0; i < count; i++) {
         const ang = (Math.random() * Math.PI * 2);
-        const r   = Math.random() * 22;
+        const r   = 6 + Math.random() * 16;
         const ax  = Math.round(gx + Math.cos(ang) * r);
-        const ay  = Math.round(gy + Math.sin(ang) * r);
+        const ay  = Math.round(gy + Math.sin(ang) * r * 0.5);
         if (ax >= 0 && ax < GRID_W && ay >= 0 && ay < GRID_H)
           acidPending.push({ gx: ax, gy: ay });
       }
@@ -465,6 +551,15 @@ function triggerWeaponEffect(ownerId, weaponKey, gx, gy) {
         t: 1.0, color: '#40ff40' });
       break;
     }
+
+    case 'clusterFragment':
+      explode(ownerId, gx, gy, WEAPONS.clusterFragment.explodeR, WEAPONS.clusterFragment.damage);
+      break;
+
+    case 'clusterbomb':
+      // If it impacts before splitting, do a smaller direct blast
+      explode(ownerId, gx, gy, 16, 120);
+      break;
 
     case 'snowball': {
       const sRadius = 28;
@@ -613,6 +708,9 @@ function updateAcidDamage() {
         if (getCell(gx, gy) === ACID) {
           // Neutral environmental damage – acid burns, no money penalty
           dealDamage(null, p.id, ACID_DAMAGE);
+          setCell(gx, gy, EMPTY); // acid decays after burning a player
+          // consume a little nearby acid too for faster cleanup
+          if (Math.random() < 0.6) setCell(gx + (Math.random() < 0.5 ? -1 : 1), gy, EMPTY);
           hit = true;
         }
       }
@@ -624,14 +722,18 @@ function updateAcidDamage() {
 //  INPUT HANDLING
 // ══════════════════════════════════════════════════════════════
 const PLAYER_KEYS = [
-  // Player 0: A/D + Space + Q/E
-  { left:'KeyA', right:'KeyD', fire:'Space', prevWeapon:'KeyQ', nextWeapon:'KeyE' },
-  // Player 1: ←/→ + Enter + Z/X
-  { left:'ArrowLeft', right:'ArrowRight', fire:'Enter', prevWeapon:'KeyZ', nextWeapon:'KeyX' },
-  // Player 2: J/L + M + I/O
-  { left:'KeyJ', right:'KeyL', fire:'KeyM', prevWeapon:'KeyI', nextWeapon:'KeyO' },
-  // Player 3: Numpad4/6 + Num0 + Num7/9
-  { left:'Numpad4', right:'Numpad6', fire:'Numpad0', prevWeapon:'Numpad7', nextWeapon:'Numpad9' },
+  // Player 1: A/D + Space + W/S
+  { left:'KeyA', right:'KeyD', fire:'Space', prevWeapon:'KeyW', nextWeapon:'KeyS' },
+  // Player 2: ←/→ + Enter + ↑/↓
+  { left:'ArrowLeft', right:'ArrowRight', fire:'Enter', prevWeapon:'ArrowUp', nextWeapon:'ArrowDown' },
+  // Player 3: J/L + U + I/K
+  { left:'KeyJ', right:'KeyL', fire:'KeyU', prevWeapon:'KeyI', nextWeapon:'KeyK' },
+  // Player 4: F/H + T + R/G
+  { left:'KeyF', right:'KeyH', fire:'KeyT', prevWeapon:'KeyR', nextWeapon:'KeyG' },
+  // Player 5: Numpad4/6 + Numpad0 + Numpad7/8
+  { left:'Numpad4', right:'Numpad6', fire:'Numpad0', prevWeapon:'Numpad7', nextWeapon:'Numpad8' },
+  // Player 6: V/N + B + C/M
+  { left:'KeyV', right:'KeyN', fire:'KeyB', prevWeapon:'KeyC', nextWeapon:'KeyM' },
 ];
 
 document.addEventListener('keydown', e => {
@@ -657,21 +759,29 @@ function processInput() {
     if (keys[binds.right]) player.angle = Math.max(5,   player.angle - ANGLE_SPEED);
 
     // Cycle weapon
-    const wKey   = WEAPONS[player.currentWeaponKey];
     if (justPressed(binds.prevWeapon)) cycleWeapon(player, -1);
     if (justPressed(binds.nextWeapon)) cycleWeapon(player,  1);
 
     // Charge / fire
     if (player.canShoot) {
       const wDef = WEAPONS[player.currentWeaponKey];
-      if (keys[binds.fire]) {
-        player.charging = true;
-        player.power = Math.min(MAX_POWER, player.power + CHARGE_RATE);
-      } else if (player.charging) {
-        // Release → shoot
-        player.charging = false;
-        shootPlayer(player);
-        player.power = 0;
+      if (wDef.type === 'laser' || player.currentWeaponKey === 'gunshot') {
+        if (justPressed(binds.fire)) {
+          player.charging = false;
+          player.power = MAX_POWER;
+          shootPlayer(player);
+          player.power = 0;
+        }
+      } else {
+        if (keys[binds.fire]) {
+          player.charging = true;
+          player.power = Math.min(MAX_POWER, player.power + CHARGE_RATE);
+        } else if (player.charging) {
+          // Release → shoot
+          player.charging = false;
+          shootPlayer(player);
+          player.power = 0;
+        }
       }
     }
   }
@@ -813,6 +923,22 @@ function renderPlayers() {
     ctx.fillText(p.name, sx - tw/2, by - 10);
     ctx.fillStyle = p.color;
     ctx.fillText(p.name, sx - tw/2 - 0.5, by - 10.5);
+
+    // Weapon + ammo on tank
+    const wk = p.currentWeaponKey;
+    const ammo = p.weapons[wk] === Infinity ? '∞' : p.weapons[wk];
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText(`${WEAPONS[wk].icon}${ammo}`, bx + 2, by + bh + 10);
+
+    // Power charge bar on tank while charging
+    if (p.charging) {
+      const pw = Math.round((p.power / MAX_POWER) * bw);
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(bx, by + bh + 12, bw, 3);
+      ctx.fillStyle = '#f0c040';
+      ctx.fillRect(bx, by + bh + 12, pw, 3);
+    }
   }
 }
 
@@ -1025,6 +1151,9 @@ function startRound() {
     p.charging = false;
     p.power    = 0;
     p.weaponIdx = 0;
+    if (unlimitedAmmoMode) {
+      for (const wk of WEAPON_ORDER) p.weapons[wk] = Infinity;
+    }
     // Place evenly
     p.gx = Math.floor(GRID_W * (i + 1) / (players.length + 1));
     p.snapToTerrain();
@@ -1124,7 +1253,8 @@ function initSocket() {
     showBanner('A player disconnected', 2000);
   });
 
-  socket.on('gameStart', ({ seed, playerData }) => {
+  socket.on('gameStart', ({ seed, playerData, unlimitedAmmoMode: serverUnlimitedAmmoMode }) => {
+    unlimitedAmmoMode = !!serverUnlimitedAmmoMode;
     startOnlineGame(seed, playerData);
   });
 
@@ -1182,10 +1312,56 @@ function updateRoomPlayerList(list) {
 function startOnlineGame(seed, playerData) {
   DOM.lobby.classList.add('hidden');
   DOM.gameScreen.classList.remove('hidden');
+  const myIds = [];
+  let cursor = 0;
+  for (const entry of (playerData || [])) {
+    const count = Math.max(1, Math.min(2, entry.numLocalPlayers || 1));
+    if (entry.idx === myConnectionIdx) {
+      for (let i = 0; i < count; i++) myIds.push(cursor + i);
+    }
+    cursor += count;
+  }
+  myPlayerIndices = myIds;
+  const list = (playerData || []).flatMap((entry) => {
+    const count = Math.max(1, Math.min(2, entry.numLocalPlayers || 1));
+    const res = [];
+    for (let i = 0; i < count; i++) {
+      const suffix = count > 1 ? ` ${i + 1}` : '';
+      res.push({ name: `${entry.name}${suffix}` });
+    }
+    return res;
+  });
+  players = list.map((p, i) => new Player(i, p.name, 0, PLAYER_PALETTE[i % PLAYER_PALETTE.length]));
+  buildHUD();
+  startRoundWithSeed(seed);
+}
+
+function startRoundWithSeed(seed) {
+  roundNum++;
   phase = 'playing';
-  // Build players from playerData
-  // (Simplified: just start a round)
-  startRound();
+  projectiles = [];
+  laserBeams  = [];
+  explosionFx = [];
+  acidPending = [];
+  generateTerrain(seed);
+
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i];
+    p.hp = p.maxHp;
+    p.alive = true;
+    p.canShoot = true;
+    p.charging = false;
+    p.power = 0;
+    p.weaponIdx = 0;
+    if (unlimitedAmmoMode) {
+      for (const wk of WEAPON_ORDER) p.weapons[wk] = Infinity;
+    }
+    p.gx = Math.floor(GRID_W * (i + 1) / (players.length + 1));
+    p.snapToTerrain();
+  }
+
+  updateHUD();
+  showBanner(`Round ${roundNum}`, 1800);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1212,9 +1388,18 @@ function startLocalGame() {
     names.push(el ? el.value.trim() || `Player ${i+1}` : `Player ${i+1}`);
   }
 
-  players = names.map((name, i) =>
-    new Player(i, name, 0, PLAYER_PALETTE[i % PLAYER_PALETTE.length]));
+  unlimitedAmmoMode = !!DOM.unlimitedAmmo?.checked;
 
+  players = names.map((name, i) => {
+    const p = new Player(i, name, 0, PLAYER_PALETTE[i % PLAYER_PALETTE.length]);
+    if (unlimitedAmmoMode) {
+      for (const wk of WEAPON_ORDER) p.weapons[wk] = Infinity;
+    }
+    return p;
+  });
+
+  myConnectionIdx = 0;
+  myLocalCount = players.length;
   myPlayerIndices = players.map(p => p.id);
   isOnline = false;
 
@@ -1251,6 +1436,7 @@ function cacheDOMRefs() {
   DOM.waitingPanel    = document.getElementById('waiting-panel');
   DOM.roomPlayersList = document.getElementById('room-players-list');
   DOM.btnStartOnline  = document.getElementById('btn-start-online');
+  DOM.unlimitedAmmo   = document.getElementById('unlimited-ammo');
 }
 
 function bindLobbyEvents() {
@@ -1265,7 +1451,10 @@ function bindLobbyEvents() {
       if (res.ok) {
         isHost = true;
         roomCode = res.code;
-        myPlayerIndices = [res.idx];
+        myConnectionIdx = res.idx;
+        myLocalCount = local;
+        myPlayerIndices = [];
+        for (let i = 0; i < local; i++) myPlayerIndices.push(res.idx + i);
         setRoomStatus(`Room created: ${res.code}  |  Waiting for players...`, 'ok');
         updateRoomPlayerList(res.players);
         DOM.btnStartOnline.style.display = '';
@@ -1285,7 +1474,10 @@ function bindLobbyEvents() {
       if (res.ok) {
         isHost = false;
         roomCode = code;
-        myPlayerIndices = [res.idx];
+        myConnectionIdx = res.idx;
+        myLocalCount = local;
+        myPlayerIndices = [];
+        for (let i = 0; i < local; i++) myPlayerIndices.push(res.idx + i);
         setRoomStatus(`Joined room ${code}  |  Waiting for host to start...`, 'ok');
         updateRoomPlayerList(res.players);
       } else {
@@ -1297,7 +1489,8 @@ function bindLobbyEvents() {
   DOM.btnStartOnline.addEventListener('click', () => {
     if (!isHost) return;
     const seed = Math.floor(Math.random() * 0xFFFFFF);
-    socket.emit('startGame', { seed, playerData: [] });
+    unlimitedAmmoMode = !!DOM.unlimitedAmmo?.checked;
+    socket.emit('startGame', { seed, unlimitedAmmoMode });
   });
 }
 

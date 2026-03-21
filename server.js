@@ -72,7 +72,15 @@ io.on('connection', socket => {
     const room = rooms.get(socket.roomCode);
     if (!room) return;
     room.started = true;
-    io.to(socket.roomCode).emit('gameStart', data);
+    io.to(socket.roomCode).emit('gameStart', {
+      seed: data.seed,
+      unlimitedAmmoMode: !!data.unlimitedAmmoMode,
+      playerData: room.players.map(p => ({
+        idx: p.idx,
+        name: p.name,
+        numLocalPlayers: p.numLocalPlayers || 1,
+      })),
+    });
   });
 
   // ── Relay generic game events ─────────────────────────────────
