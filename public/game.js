@@ -47,6 +47,7 @@ const BEDROCK_WAVE_AMP_2 = 1.2;
 const GAME_LOOP_FPS = 30;
 const GAME_LOOP_STEP_MS = 1000 / GAME_LOOP_FPS;
 const GAME_LOOP_MAX_CATCHUP_STEPS = 3;
+const GOD_REFOCUS_FRAMES = 55;
 const BOT_AIM_VARIANCE = {
   easy: 26,
   medium: 10,
@@ -1451,11 +1452,29 @@ function pickNearestTarget(botPlayer) {
   }, opponents[0]);
 }
 
-function pickTarget(botPlayer, mode) {
+function pickNextAliveTarget(botPlayer, lastTargetId) {
+  const opponents = getAliveOpponents(botPlayer);
+  if (opponents.length === 0) return null;
+  if (lastTargetId === undefined || lastTargetId === null) return opponents[0];
+
+  const sorted = opponents.slice().sort((a, b) => a.id - b.id);
+  const idx = sorted.findIndex(p => p.id === lastTargetId);
+  if (idx < 0) return sorted[0];
+  return sorted[(idx + 1) % sorted.length];
+}
+
+function pickTarget(botPlayer, mode, state = null) {
   const opponents = getAliveOpponents(botPlayer);
   if (opponents.length === 0) return null;
   if (mode === 'easy') {
     return opponents[Math.floor(Math.random() * opponents.length)];
+  }
+  if (mode === 'god' && state) {
+    const missedLastShot = state.lastShotFrame > state.lastHitFrame
+      && (frameCount - state.lastShotFrame) >= GOD_REFOCUS_FRAMES;
+    if (missedLastShot) {
+      return pickNextAliveTarget(botPlayer, state.lastTargetId);
+    }
   }
   if (mode === 'medium' || mode === 'hard' || mode === 'expert' || mode === 'god') {
     return pickNearestTarget(botPlayer);
@@ -1683,7 +1702,7 @@ function runBotShop(botPlayer) {
 function fireBot(botPlayer) {
   const state = botPlayer.bot;
   if (!state || !botPlayer.canShoot || !botPlayer.alive) return;
-  let target = pickTarget(botPlayer, state.mode);
+  let target = pickTarget(botPlayer, state.mode, state);
   if (!target || !target.alive || target.hp <= 0) {
     const fallback = getAliveOpponents(botPlayer);
     if (fallback.length === 0) return;
@@ -1701,6 +1720,8 @@ function fireBot(botPlayer) {
   }
 
   shootPlayer(botPlayer);
+  state.lastShotFrame = frameCount;
+  state.lastTargetId = target.id;
   updateBotLearning(botPlayer, target, shot);
 
   const cadenceByMode = {
@@ -1922,6 +1943,8 @@ function assignBotsFromNames() {
       angleBias: 0,
       powerBias: 0,
       lastHitFrame: -99999,
+      lastShotFrame: -99999,
+      lastTargetId: null,
       hasConfirmedHit: false,
     };
     bots.push(p.id);
