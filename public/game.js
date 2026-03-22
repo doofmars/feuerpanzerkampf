@@ -761,10 +761,10 @@ function activateShield(player) {
 //  INPUT HANDLING
 // ══════════════════════════════════════════════════════════════
 const PLAYER_KEYS = [
-  // Player 1: A/D + Space + W/S
-  { left:'KeyA', right:'KeyD', fire:'Space', prevWeapon:'KeyW', nextWeapon:'KeyS' },
-  // Player 2: ←/→ + Enter + ↑/↓
+  // Player 1: ←/→ + Enter + ↑/↓
   { left:'ArrowLeft', right:'ArrowRight', fire:'Enter', prevWeapon:'ArrowUp', nextWeapon:'ArrowDown' },
+  // Player 2: A/D + Space + W/S
+  { left:'KeyA', right:'KeyD', fire:'Space', prevWeapon:'KeyW', nextWeapon:'KeyS' },
   // Player 3: J/L + U + I/K
   { left:'KeyJ', right:'KeyL', fire:'KeyU', prevWeapon:'KeyI', nextWeapon:'KeyK' },
   // Player 4: F/H + T + R/G
