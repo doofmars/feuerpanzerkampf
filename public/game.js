@@ -45,6 +45,9 @@ const BEDROCK_WAVE_FREQ_1 = 0.07;
 const BEDROCK_WAVE_AMP_1 = 2;
 const BEDROCK_WAVE_FREQ_2 = 0.19;
 const BEDROCK_WAVE_AMP_2 = 1.2;
+const GAME_LOOP_FPS = 30;
+const GAME_LOOP_STEP_MS = 1000 / GAME_LOOP_FPS;
+const GAME_LOOP_MAX_CATCHUP_STEPS = 3;
 const BOT_AIM_VARIANCE = {
   easy: 14,
   medium: 8,
@@ -161,6 +164,8 @@ let myConnectionIdx = 0;
 let myLocalCount = 1;
 let roomCode = '';
 let unlimitedAmmoMode = false;
+let gameLoopLastTime = 0;
+let gameLoopAccumulator = 0;
 
 // DOM refs
 const DOM = {};
@@ -1386,9 +1391,24 @@ function render() {
   renderPowerBar();
 }
 
-function gameLoop() {
-  update();
-  render();
+function gameLoop(now = 0) {
+  if (!gameLoopLastTime) gameLoopLastTime = now;
+
+  let deltaMs = now - gameLoopLastTime;
+  gameLoopLastTime = now;
+
+  // Avoid huge catch-up bursts after tab switches or frame stalls.
+  if (deltaMs > 250) deltaMs = GAME_LOOP_STEP_MS;
+  gameLoopAccumulator += deltaMs;
+
+  let steps = 0;
+  while (gameLoopAccumulator >= GAME_LOOP_STEP_MS && steps < GAME_LOOP_MAX_CATCHUP_STEPS) {
+    update();
+    gameLoopAccumulator -= GAME_LOOP_STEP_MS;
+    steps++;
+  }
+
+  if (steps > 0) render();
   requestAnimationFrame(gameLoop);
 }
 
