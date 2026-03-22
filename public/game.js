@@ -75,43 +75,43 @@ const WEAPONS = {
     desc:'Unlimited · arc · small blast',
   },
   rocket: {
-    name:'Rocket', icon:'🚀', cost:10, unlimited:false,
+    name:'Rocket', icon:'🚀', cost:25, unlimited:false,
     type:'ballistic', gravity:GRAVITY, powerScale:1.25,
     explodeR:26, damage:80, terrainDamage:true,
     desc:'Arc · large explosion',
   },
   acidbomb: {
-    name:'Acid Bomb', icon:'☣️', cost:20, unlimited:false,
+    name:'Acid Bomb', icon:'☣️', cost:30, unlimited:false,
     type:'ballistic', gravity:GRAVITY, powerScale:0.85,
     explodeR:10, damage:10, terrainDamage:true,
     desc:'Splash acid particles',
   },
   snowball: {
-    name:'Snow Ball', icon:'❄️', cost:15, unlimited:false,
+    name:'Snow Ball', icon:'❄️', cost:10, unlimited:false,
     type:'ballistic', gravity:GRAVITY, powerScale:0.9,
     explodeR:0, damage:0, terrainDamage:false,
     desc:'Creates blocking snow sphere',
   },
   gunshot: {
-    name:'Gun Shot', icon:'🔫', cost:50, unlimited:false,
+    name:'Gun Shot', icon:'🔫', cost:120, unlimited:false,
     type:'ballistic', gravity:GUN_GRAVITY, powerScale:1.9,
     explodeR:7, damage:150, terrainDamage:true,
     desc:'High-speed flat trajectory',
   },
   laser: {
-    name:'Laser', icon:'🔴', cost:300, unlimited:false,
+    name:'Laser', icon:'🔴', cost:250, unlimited:false,
     type:'laser', gravity:0, powerScale:1,
     explodeR:0, damage:50, terrainDamage:true,
     desc:'Instant beam · shreds terrain',
   },
   clusterbomb: {
-    name:'Cluster Bomb', icon:'🧨', cost:80, unlimited:false,
+    name:'Cluster Bomb', icon:'🧨', cost:140, unlimited:false,
     type:'cluster', gravity:GRAVITY, powerScale:1.0,
     explodeR:0, damage:0, terrainDamage:false,
     desc:'Splits mid-air into mini bombs',
   },
   shield: {
-    name:'Shield', icon:'🛡️', cost:120, unlimited:false,
+    name:'Shield', icon:'🛡️', cost:70, unlimited:false,
     type:'shield', gravity:0, powerScale:0,
     explodeR:0, damage:0, terrainDamage:false,
     desc:'Temporary barrier, clears nearby acid',
@@ -759,7 +759,7 @@ function killPlayer(player, killerId) {
   // Kill bonus for attacker
   if (killerId !== player.id) {
     const killer = players[killerId];
-    if (killer) killer.money += 500;
+    if (killer) killer.money += 200;
   }
 
   // Death explosion: damages nearby players
