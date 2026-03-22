@@ -1,6 +1,6 @@
 # Feuerpanzerkampf
 
-![feuerpanzerkampf image](feuerpanzerkampf-1.png)
+[![feuerpanzerkampf image](feuerpanzerkampf.png)](https://doofmars.github.io/feuerpanzerkampf/)
 
 Feuerpanzerkampf is a browser artillery game inspired by Scorched Earth / Worms with destructible sand-style terrain, local + online multiplayer, and a between-round economy/shop loop.
 
