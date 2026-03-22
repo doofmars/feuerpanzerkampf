@@ -48,6 +48,7 @@ const GAME_LOOP_FPS = 30;
 const GAME_LOOP_STEP_MS = 1000 / GAME_LOOP_FPS;
 const GAME_LOOP_MAX_CATCHUP_STEPS = 3;
 const GOD_REFOCUS_FRAMES = 55;
+const BOT_MIN_POWER = 1.4;
 const BOT_AIM_VARIANCE = {
   easy: 26,
   medium: 10,
@@ -1525,11 +1526,12 @@ function clamp(min, v, max) {
 function solveBallisticShot(botPlayer, target, weaponKey) {
   const def = WEAPONS[weaponKey] || WEAPONS.cannonball;
   const g = def.gravity;
-  const sx = botPlayer.gx;
-  const sy = botPlayer.gy + TANK_H_CELLS / 2;
+  const muzzle = botPlayer.cannonTip();
+  const sx = muzzle.x;
+  const sy = muzzle.y;
   const tx = target.gx;
   const ty = target.gy + TANK_H_CELLS / 2;
-  const x = target.gx - botPlayer.gx;
+  const x = tx - sx;
   const y = sy - ty;
   const absX = Math.abs(x);
 
@@ -1537,18 +1539,18 @@ function solveBallisticShot(botPlayer, target, weaponKey) {
   if (absX < 1.2) {
     return {
       angle: y >= 0 ? 90 : 82,
-      power: clamp(7, 10.5, MAX_POWER),
+      power: clamp(BOT_MIN_POWER, 10.5, MAX_POWER),
     };
   }
 
   // Brute-force from low to high speed to get near-minimum power perfect-ish shots.
   const maxSpeed = MAX_POWER * def.powerScale;
-  for (let v = 6.5 * def.powerScale; v <= maxSpeed; v += 0.2) {
+  for (let v = BOT_MIN_POWER * def.powerScale; v <= maxSpeed; v += 0.2) {
     if (g <= 0) {
-      const dy = (target.gy + TANK_H_CELLS / 2) - (botPlayer.gy + TANK_H_CELLS / 2);
+      const dy = ty - sy;
       const angleDirect = Math.atan2(-dy, x) * 180 / Math.PI;
       const norm = angleDirect < 0 ? angleDirect + 180 : angleDirect;
-      return { angle: clamp(5, norm, 175), power: clamp(6, v / def.powerScale, MAX_POWER) };
+      return { angle: clamp(5, norm, 175), power: clamp(BOT_MIN_POWER, v / def.powerScale, MAX_POWER) };
     }
 
     const vv = v * v;
@@ -1567,7 +1569,7 @@ function solveBallisticShot(botPlayer, target, weaponKey) {
     const angle = x >= 0 ? theta : (180 - theta);
     return {
       angle: clamp(5, angle, 175),
-      power: clamp(6, v / def.powerScale, MAX_POWER),
+      power: clamp(BOT_MIN_POWER, v / def.powerScale, MAX_POWER),
     };
   }
 
@@ -1575,10 +1577,10 @@ function solveBallisticShot(botPlayer, target, weaponKey) {
   let best = {
     err: Infinity,
     angle: x >= 0 ? 45 : 135,
-    power: clamp(6, MAX_POWER * 0.75, MAX_POWER),
+    power: clamp(BOT_MIN_POWER, MAX_POWER * 0.75, MAX_POWER),
   };
 
-  for (let power = 6; power <= MAX_POWER; power += 0.35) {
+  for (let power = BOT_MIN_POWER; power <= MAX_POWER; power += 0.35) {
     const v = power * def.powerScale;
     for (let angle = 8; angle <= 172; angle += 1.5) {
       if (x >= 0 && angle >= 90) continue;
@@ -1600,7 +1602,7 @@ function solveBallisticShot(botPlayer, target, weaponKey) {
       if (err <= 0.6) {
         return {
           angle: clamp(5, angle, 175),
-          power: clamp(6, power, MAX_POWER),
+          power: clamp(BOT_MIN_POWER, power, MAX_POWER),
         };
       }
     }
@@ -1608,11 +1610,11 @@ function solveBallisticShot(botPlayer, target, weaponKey) {
 
   return {
     angle: clamp(5, best.angle, 175),
-    power: clamp(6, best.power, MAX_POWER),
+    power: clamp(BOT_MIN_POWER, best.power, MAX_POWER),
   };
 }
 
-function chooseBotWeapon(botPlayer, state) {
+function chooseBotWeapon(botPlayer, state, target = null) {
   const mode = state.mode;
   if (mode === 'easy') return 'cannonball';
 
@@ -1631,6 +1633,9 @@ function chooseBotWeapon(botPlayer, state) {
   }
 
   if (mode === 'god') {
+    const duelMode = getAliveOpponents(botPlayer).length <= 1;
+    const closeDuel = duelMode && target && Math.abs(target.gx - botPlayer.gx) <= 170;
+    if (closeDuel) return 'cannonball';
     if (botPlayer.weapons.rocket > 0) return 'rocket';
     return 'cannonball';
   }
@@ -1665,7 +1670,7 @@ function estimateBotAim(botPlayer, target, state, weaponKey) {
   angle += state.angleBias + (Math.random() * 2 - 1) * variance;
   power += state.powerBias + (Math.random() * 2 - 1) * variance * 0.22;
 
-  if (weaponKey === 'rocket' && (state.mode === 'hard' || state.mode === 'expert' || state.mode === 'god')) {
+  if (weaponKey === 'rocket' && (state.mode === 'hard' || state.mode === 'expert')) {
     power += 1.6; // stronger follow-up shot once hard bot locks on
   }
 
@@ -1745,7 +1750,7 @@ function fireBot(botPlayer) {
     target = fallback[0];
   }
 
-  const wk = chooseBotWeapon(botPlayer, state);
+  const wk = chooseBotWeapon(botPlayer, state, target);
   botPlayer.weaponIdx = Math.max(0, WEAPON_ORDER.indexOf(wk));
   const shot = estimateBotAim(botPlayer, target, state, wk);
   botPlayer.angle = shot.angle;
