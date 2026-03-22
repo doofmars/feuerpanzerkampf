@@ -183,6 +183,70 @@ input:focus, select:focus { outline: none; border-color: #f0c040; }
   max-width: 100%;
 }
 
+#touch-controls {
+  width: 1200px;
+  max-width: 100%;
+  background: #101825;
+  border: 1px solid #223048;
+  border-top: none;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  touch-action: none;
+}
+
+.touch-row {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr;
+  gap: 8px;
+}
+
+.touch-row-weapon {
+  grid-template-columns: 1fr;
+}
+
+.touch-btn {
+  border: 1px solid #4b658e;
+  background: #1b2d48;
+  color: #e8e4d0;
+  border-radius: 6px;
+  padding: 10px 8px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: bold;
+  letter-spacing: 0.4px;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.touch-btn:active {
+  filter: brightness(1.2);
+}
+
+.touch-btn-fire {
+  background: #7f2f1b;
+  border-color: #c25f3f;
+}
+
+.touch-btn-aim {
+  background: #234227;
+  border-color: #4f8c56;
+  font-size: 1.1rem;
+}
+
+.touch-btn-weapon {
+  background: #1f3e57;
+  border-color: #4f89b3;
+}
+
+@media (min-width: 901px) {
+  #touch-controls {
+    display: none !important;
+  }
+}
+
 /* ── Shop modal ──────────────────────────────────────────────── */
 #shop-modal {
   position: fixed;

@@ -167,6 +167,7 @@ let unlimitedAmmoMode = false;
 let gameLoopLastTime = 0;
 let gameLoopAccumulator = 0;
 let onlineMultiplayerAvailable = false;
+let touchControlsEnabled = false;
 
 // DOM refs
 const DOM = {};
@@ -803,6 +804,81 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 
+function isMobileDevice() {
+  return window.matchMedia('(pointer: coarse)').matches
+    || /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent || '');
+}
+
+function bindTouchControlButton(btn) {
+  if (!btn) return;
+
+  const keyCode = btn.dataset.key;
+  const isTapOnly = btn.dataset.tap === 'true';
+  let tapReleaseTimer = null;
+
+  const press = (e) => {
+    e.preventDefault();
+    keys[keyCode] = true;
+    if (isTapOnly) {
+      if (tapReleaseTimer) clearTimeout(tapReleaseTimer);
+      tapReleaseTimer = setTimeout(() => {
+        keys[keyCode] = false;
+        tapReleaseTimer = null;
+      }, 90);
+    }
+  };
+
+  const release = (e) => {
+    e.preventDefault();
+    if (tapReleaseTimer) {
+      clearTimeout(tapReleaseTimer);
+      tapReleaseTimer = null;
+    }
+    keys[keyCode] = false;
+  };
+
+  btn.addEventListener('pointerdown', press);
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave', release);
+}
+
+function initTouchControls() {
+  if (!DOM.touchControls) return;
+
+  touchControlsEnabled = isMobileDevice();
+  if (!touchControlsEnabled) {
+    DOM.touchControls.classList.add('hidden');
+    if (DOM.controlsHelp) DOM.controlsHelp.classList.remove('hidden');
+    return;
+  }
+
+  DOM.touchControls.classList.remove('hidden');
+  if (DOM.controlsHelp) DOM.controlsHelp.classList.add('hidden');
+  const buttons = DOM.touchControls.querySelectorAll('[data-key]');
+  buttons.forEach(bindTouchControlButton);
+  updateTouchWeaponToggleLabel();
+}
+
+function getPrimaryLocalPlayer() {
+  if (!players || players.length === 0 || myPlayerIndices.length === 0) return null;
+  const playerId = myPlayerIndices[0];
+  return players[playerId] || null;
+}
+
+function updateTouchWeaponToggleLabel() {
+  if (!touchControlsEnabled || !DOM.touchWeaponToggle) return;
+  const p = getPrimaryLocalPlayer();
+  if (!p) {
+    DOM.touchWeaponToggle.textContent = 'Weapon Toggle · --';
+    return;
+  }
+
+  const wk = p.currentWeaponKey;
+  const w = WEAPONS[wk];
+  DOM.touchWeaponToggle.textContent = `Weapon Toggle · ${w.icon} ${w.name}`;
+}
+
 function processInput() {
   if (phase !== 'playing') return;
 
@@ -1166,6 +1242,8 @@ function updateHUD() {
       panel.classList.add('active');
     }
   }
+
+  updateTouchWeaponToggleLabel();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1651,6 +1729,9 @@ function cacheDOMRefs() {
   DOM.roundBanner     = document.getElementById('round-banner');
   DOM.powerBarContainer= document.getElementById('power-bar-container');
   DOM.powerBarFill    = document.getElementById('power-bar-fill');
+  DOM.controlsHelp    = document.getElementById('controls-help');
+  DOM.touchControls   = document.getElementById('touch-controls');
+  DOM.touchWeaponToggle = document.getElementById('touch-weapon-toggle');
   DOM.onlineSection   = document.getElementById('online-section');
   DOM.onlineControls  = document.getElementById('online-controls');
   DOM.onlineUnavailableNote = document.getElementById('online-unavailable-note');
@@ -1745,6 +1826,7 @@ function init() {
 
   initTerrainCanvas();
   cacheDOMRefs();
+  initTouchControls();
   detectOnlineMultiplayerAvailability();
   setupPlayerNameFields();
   bindLobbyEvents();

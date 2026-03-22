@@ -86,6 +86,18 @@
   <!-- Main canvas -->
   <canvas id="canvas" width="1200" height="600"></canvas>
 
+  <!-- Mobile touch controls (Player 1) -->
+  <div id="touch-controls" class="hidden" aria-label="Player 1 touch controls">
+    <div class="touch-row">
+      <button class="touch-btn touch-btn-aim" data-key="ArrowLeft">◀</button>
+      <button class="touch-btn touch-btn-fire" data-key="Enter">Fire / Charge</button>
+      <button class="touch-btn touch-btn-aim" data-key="ArrowRight">▶</button>
+    </div>
+    <div class="touch-row touch-row-weapon">
+      <button id="touch-weapon-toggle" class="touch-btn touch-btn-weapon" data-key="ArrowDown" data-tap="true">Weapon Toggle · --</button>
+    </div>
+  </div>
+
   <!-- Controls hint bar -->
   <div id="controls-help">
     <span>P1: ←/→ rotate · ENTER charge+fire · ↑/↓ weapon</span>
