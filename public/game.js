@@ -128,6 +128,7 @@ let roundNum  = 0;
 let frameCount = 0;
 let gameOver  = false;
 let shopPlayerIdx = 0;
+let bots = [];
 
 // Sand physics tick rate (every N frames)
 const SAND_EVERY = 1;
@@ -393,6 +394,7 @@ class Player {
     };
     this.weaponIdx = 0;      // index into WEAPON_ORDER
     this.shieldUntilFrame = 0;
+    this.bot = null;
   }
 
   get currentWeaponKey() { return WEAPON_ORDER[this.weaponIdx]; }
@@ -1264,6 +1266,8 @@ function update() {
     if (p.alive) p.snapToTerrain();
   }
 
+  updateBots();
+
   // Acid damage
   if (frameCount % 4 === 0) updateAcidDamage();
 
@@ -1278,6 +1282,60 @@ function update() {
   }
   laserBeams  = laserBeams.filter(b => b.t > 0);
   explosionFx = explosionFx.filter(f => f.t > 0);
+}
+
+function getAliveOpponents(botPlayer) {
+  return players.filter(p => p.alive && p.id !== botPlayer.id);
+}
+
+function pickTarget(botPlayer, mode) {
+  const opponents = getAliveOpponents(botPlayer);
+  if (opponents.length === 0) return null;
+  if (mode === 'hard') {
+    return opponents.reduce((m, p) => p.hp < m.hp ? p : m, opponents[0]);
+  }
+  return opponents[0];
+}
+
+function fireBot(botPlayer) {
+  const state = botPlayer.bot;
+  if (!state || !botPlayer.canShoot || !botPlayer.alive) return;
+  const target = pickTarget(botPlayer, state.mode);
+  if (!target) return;
+
+  const dx = target.gx - botPlayer.gx;
+  const baseAngle = 90 - Math.atan2(target.gy - botPlayer.gy, dx) * 180 / Math.PI;
+  const basePower = Math.max(8, Math.min(MAX_POWER, Math.abs(dx) * 0.08 + 10));
+
+  const variance = state.mode === 'easy' ? 14
+    : state.mode === 'medium' ? 8
+    : state.mode === 'hard' ? 5
+    : 0;
+  const fast = state.mode === 'god';
+  const adaptive = state.mode === 'medium' || state.mode === 'hard';
+  if (adaptive && state.lastErrorAngle != null) {
+    state.angleBias -= state.lastErrorAngle * (state.mode === 'hard' ? 0.35 : 0.2);
+  }
+
+  botPlayer.angle = Math.max(5, Math.min(175, baseAngle + state.angleBias + (Math.random() * 2 - 1) * variance));
+  botPlayer.power = state.mode === 'expert' || state.mode === 'god'
+    ? basePower
+    : Math.max(6, Math.min(MAX_POWER, basePower + (Math.random() * 2 - 1) * variance * 0.3));
+
+  if (botPlayer.currentWeaponKey === 'laser' || botPlayer.currentWeaponKey === 'gunshot') {
+    botPlayer.power = MAX_POWER;
+  }
+  shootPlayer(botPlayer);
+  state.nextFireFrame = frameCount + (fast ? 20 : 120 + Math.floor(Math.random() * 80));
+  state.lastErrorAngle = (Math.random() * 2 - 1) * (variance * 0.15);
+}
+
+function updateBots() {
+  if (phase !== 'playing') return;
+  for (const p of players) {
+    if (!p.bot || !p.alive) continue;
+    if (frameCount >= p.bot.nextFireFrame) fireBot(p);
+  }
 }
 
 function render() {
@@ -1419,6 +1477,27 @@ function startRoundWithSeed(seed) {
 
   updateHUD();
   showBanner(`Round ${roundNum}`, 1800);
+
+  if (!isOnline) assignBotsFromNames();
+}
+
+function assignBotsFromNames() {
+  bots = [];
+  for (const p of players) {
+    const m = /\[(easy|medium|hard|expert|god)\]/i.exec(p.name);
+    if (!m) {
+      p.bot = null;
+      continue;
+    }
+    const mode = m[1].toLowerCase();
+    p.bot = {
+      mode,
+      nextFireFrame: frameCount + 120 + Math.floor(Math.random() * 120),
+      angleBias: 0,
+      lastErrorAngle: 0,
+    };
+    bots.push(p.id);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1459,6 +1538,7 @@ function startLocalGame() {
   myLocalCount = players.length;
   myPlayerIndices = players.map(p => p.id);
   isOnline = false;
+  assignBotsFromNames();
 
   DOM.lobby.classList.add('hidden');
   DOM.gameScreen.classList.remove('hidden');
