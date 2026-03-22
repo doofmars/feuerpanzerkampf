@@ -166,6 +166,7 @@ let roomCode = '';
 let unlimitedAmmoMode = false;
 let gameLoopLastTime = 0;
 let gameLoopAccumulator = 0;
+let onlineMultiplayerAvailable = false;
 
 // DOM refs
 const DOM = {};
@@ -1416,6 +1417,11 @@ function gameLoop(now = 0) {
 //  NETWORK (Socket.io)
 // ══════════════════════════════════════════════════════════════
 function initSocket() {
+  if (!onlineMultiplayerAvailable || typeof window.io !== 'function') {
+    setRoomStatus('Online multiplayer unavailable in static mode.', 'err');
+    return false;
+  }
+
   socket = io();
 
   socket.on('playerJoined', ({ players: list }) => {
@@ -1441,6 +1447,8 @@ function initSocket() {
     }
     terrainDirty = true;
   });
+
+  return true;
 }
 
 function handleRemoteEvent(evt) {
@@ -1643,6 +1651,9 @@ function cacheDOMRefs() {
   DOM.roundBanner     = document.getElementById('round-banner');
   DOM.powerBarContainer= document.getElementById('power-bar-container');
   DOM.powerBarFill    = document.getElementById('power-bar-fill');
+  DOM.onlineSection   = document.getElementById('online-section');
+  DOM.onlineControls  = document.getElementById('online-controls');
+  DOM.onlineUnavailableNote = document.getElementById('online-unavailable-note');
   DOM.onlineName      = document.getElementById('online-name');
   DOM.onlineLocal     = document.getElementById('online-local');
   DOM.btnCreate       = document.getElementById('btn-create');
@@ -1655,12 +1666,27 @@ function cacheDOMRefs() {
   DOM.unlimitedAmmo   = document.getElementById('unlimited-ammo');
 }
 
+function detectOnlineMultiplayerAvailability() {
+  onlineMultiplayerAvailable = typeof window.io === 'function';
+
+  if (!onlineMultiplayerAvailable) {
+    if (DOM.onlineControls) DOM.onlineControls.classList.add('hidden');
+    if (DOM.onlineUnavailableNote) {
+      DOM.onlineUnavailableNote.textContent =
+        'Online multiplayer is disabled because no realtime server is available in this deployment.';
+      DOM.onlineUnavailableNote.classList.remove('hidden');
+    }
+  }
+}
+
 function bindLobbyEvents() {
   DOM.numPlayers.addEventListener('input', setupPlayerNameFields);
   DOM.btnLocal.addEventListener('click', startLocalGame);
 
+  if (!onlineMultiplayerAvailable) return;
+
   DOM.btnCreate.addEventListener('click', () => {
-    if (!socket) initSocket();
+    if (!socket && !initSocket()) return;
     const name = DOM.onlineName.value.trim() || 'Commander';
     const local = parseInt(DOM.onlineLocal.value) || 1;
     socket.emit('createRoom', { playerName: name, numLocalPlayers: local }, res => {
@@ -1680,7 +1706,7 @@ function bindLobbyEvents() {
   });
 
   DOM.btnJoin.addEventListener('click', () => {
-    if (!socket) initSocket();
+    if (!socket && !initSocket()) return;
     const code  = DOM.roomCodeInput.value.trim().toUpperCase();
     const name  = DOM.onlineName.value.trim() || 'Commander';
     const local = parseInt(DOM.onlineLocal.value) || 1;
@@ -1719,6 +1745,7 @@ function init() {
 
   initTerrainCanvas();
   cacheDOMRefs();
+  detectOnlineMultiplayerAvailability();
   setupPlayerNameFields();
   bindLobbyEvents();
 
