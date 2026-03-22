@@ -1219,9 +1219,9 @@ function startRound() {
   updateHUD();
   showBanner(`Round ${roundNum}`, 1800);
 
-  if (isOnline && isHost) {
-    socket.emit('gameEvent', { type: 'roundStart', roundNum, seed });
-  }
+    if (isOnline && isHost) {
+      socket.emit('gameEvent', { type: 'roundStart', roundNum, seed });
+    }
 }
 
 function endRound(winner) {
