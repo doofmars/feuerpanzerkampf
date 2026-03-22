@@ -41,6 +41,10 @@ const ACID_SPLASH_RADIUS_VARIANCE = 16;
 const ACID_DECAY_NEIGHBOR_PROBABILITY = 0.6;
 const SHIELD_DURATION_FRAMES = 60 * 5; // 5s
 const SHIELD_ACID_CLEAR_RADIUS = 12;
+const BEDROCK_WAVE_FREQ_1 = 0.07;
+const BEDROCK_WAVE_AMP_1 = 2;
+const BEDROCK_WAVE_FREQ_2 = 0.19;
+const BEDROCK_WAVE_AMP_2 = 1.2;
 
 // Player colors (body, highlight)
 const PLAYER_PALETTE = [
@@ -238,7 +242,9 @@ function generateTerrain(seed) {
     const surf = Math.floor(heights[x]);
     for (let y = surf; y < GRID_H; y++) {
       if (y === surf) terrain[idx(x,y)] = GRASS;
-      else if (y >= GRID_H - 18) terrain[idx(x,y)] = BEDROCK;
+      else if (y >= GRID_H - 18 + Math.floor(Math.sin(x * BEDROCK_WAVE_FREQ_1) * BEDROCK_WAVE_AMP_1 + Math.sin(x * BEDROCK_WAVE_FREQ_2) * BEDROCK_WAVE_AMP_2)) {
+        terrain[idx(x,y)] = BEDROCK;
+      }
       else terrain[idx(x,y)] = TERRAIN;
       colorSeed[idx(x,y)] = Math.floor(rand() * 32);
     }
