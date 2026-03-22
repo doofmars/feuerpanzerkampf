@@ -27,7 +27,7 @@ const GUN_GRAVITY     = 0.04;   // reduced gravity for gun-shot
 const MAX_POWER       = 22;     // max launch speed (cells/frame)
 const CHARGE_RATE     = 0.28;   // power units per frame while held
 const ANGLE_SPEED     = 1.2;    // degrees per frame while key held
-const ACID_DAMAGE     = 3;      // HP per frame acid contacts player
+const ACID_DAMAGE     = 1;      // HP per frame acid contacts player
 const TANK_W_CELLS    = 14;     // tank body width in grid cells
 const TANK_H_CELLS    = 6;      // tank body height in grid cells
 const CANNON_LEN      = 14;     // cannon arm length in cells
@@ -71,19 +71,19 @@ const WEAPONS = {
   cannonball: {
     name:'Cannon Ball', icon:'💣', cost:0, unlimited:true,
     type:'ballistic', gravity:GRAVITY, powerScale:1.0,
-    explodeR:14, damage:100, terrainDamage:true,
+    explodeR:14, damage:40, terrainDamage:true,
     desc:'Unlimited · arc · small blast',
   },
   rocket: {
     name:'Rocket', icon:'🚀', cost:10, unlimited:false,
     type:'ballistic', gravity:GRAVITY, powerScale:1.25,
-    explodeR:26, damage:200, terrainDamage:true,
+    explodeR:26, damage:80, terrainDamage:true,
     desc:'Arc · large explosion',
   },
   acidbomb: {
     name:'Acid Bomb', icon:'☣️', cost:20, unlimited:false,
     type:'ballistic', gravity:GRAVITY, powerScale:0.85,
-    explodeR:10, damage:50, terrainDamage:true,
+    explodeR:10, damage:10, terrainDamage:true,
     desc:'Splash acid particles',
   },
   snowball: {
@@ -101,7 +101,7 @@ const WEAPONS = {
   laser: {
     name:'Laser', icon:'🔴', cost:300, unlimited:false,
     type:'laser', gravity:0, powerScale:1,
-    explodeR:0, damage:200, terrainDamage:true,
+    explodeR:0, damage:50, terrainDamage:true,
     desc:'Instant beam · shreds terrain',
   },
   clusterbomb: {
@@ -400,8 +400,8 @@ class Player {
     this.gy        = 0;      // grid y (top of tank body) – updated each frame
     this.color     = color[0];
     this.colorHi   = color[1];
-    this.hp        = 1000;
-    this.maxHp     = 1000;
+    this.hp        = 200;
+    this.maxHp     = 200;
     this.money     = STARTING_MONEY;
     this.angle     = 90;     // degrees, 90 = straight up
     this.power     = 0;      // charge accumulator
@@ -414,9 +414,9 @@ class Player {
       acidbomb: 1,
       snowball: 3,
       gunshot: 3,
-      laser: 0,
+      laser: 1,
       clusterbomb: 0,
-      shield: 0,
+      shield: 2,
     };
     this.weaponIdx = 0;      // index into WEAPON_ORDER
     this.shieldUntilFrame = 0;
