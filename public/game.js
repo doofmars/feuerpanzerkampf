@@ -48,6 +48,7 @@ const GAME_LOOP_FPS = 30;
 const GAME_LOOP_STEP_MS = 1000 / GAME_LOOP_FPS;
 const GAME_LOOP_MAX_CATCHUP_STEPS = 3;
 const GOD_REFOCUS_FRAMES = 55;
+const EXPERT_REFOCUS_FRAMES = 140;
 const BOT_MIN_POWER = 1.4;
 const BOT_AIM_VARIANCE = {
   easy: 26,
@@ -742,6 +743,8 @@ function dealDamage(attackerId, targetId, amount) {
     if (attacker?.bot) {
       attacker.bot.lastHitFrame = frameCount;
       attacker.bot.hasConfirmedHit = true;
+      attacker.bot.missStreak = 0;
+      attacker.bot.lastTargetId = target.id;
     }
   }
 
@@ -1506,6 +1509,15 @@ function pickTarget(botPlayer, mode, state = null) {
   if (mode === 'easy') {
     return opponents[Math.floor(Math.random() * opponents.length)];
   }
+  if ((mode === 'hard' || mode === 'expert') && state && opponents.length > 1) {
+    const missedLastShot = state.lastShotFrame > state.lastHitFrame;
+    const stuckOnTarget = missedLastShot
+      && ((state.missStreak || 0) >= 2
+        || (frameCount - state.lastHitFrame) >= EXPERT_REFOCUS_FRAMES);
+    if (stuckOnTarget) {
+      return pickNextAliveTarget(botPlayer, state.lastTargetId);
+    }
+  }
   if (mode === 'god' && state) {
     const missedLastShot = state.lastShotFrame > state.lastHitFrame
       && (frameCount - state.lastShotFrame) >= GOD_REFOCUS_FRAMES;
@@ -1660,6 +1672,14 @@ function estimateBotAim(botPlayer, target, state, weaponKey) {
     return solveBallisticShot(botPlayer, target, weaponKey);
   }
 
+  if (state.mode === 'expert') {
+    const solved = solveBallisticShot(botPlayer, target, weaponKey);
+    return {
+      angle: clamp(5, solved.angle + (Math.random() * 2 - 1) * 0.35, 175),
+      power: clamp(BOT_MIN_POWER, solved.power + (Math.random() * 2 - 1) * 0.12, MAX_POWER),
+    };
+  }
+
   // Point toward target then blend toward an arc (90°) for ballistic flight.
   const direct = Math.atan2(botCy - targetCy, dx || 1) * 180 / Math.PI;
   const arcLiftFactor = clamp(0.28, absDx / GRID_W + 0.25, 0.78);
@@ -1670,8 +1690,8 @@ function estimateBotAim(botPlayer, target, state, weaponKey) {
   angle += state.angleBias + (Math.random() * 2 - 1) * variance;
   power += state.powerBias + (Math.random() * 2 - 1) * variance * 0.22;
 
-  if (weaponKey === 'rocket' && (state.mode === 'hard' || state.mode === 'expert')) {
-    power += 1.6; // stronger follow-up shot once hard bot locks on
+  if (weaponKey === 'rocket' && state.mode === 'hard') {
+    power += 1.1; // a lighter follow-up boost prevents frequent hard-bot overshoot
   }
 
   return {
@@ -1743,6 +1763,13 @@ function runBotShop(botPlayer) {
 function fireBot(botPlayer) {
   const state = botPlayer.bot;
   if (!state || !botPlayer.canShoot || !botPlayer.alive) return;
+
+  if (state.lastShotFrame > state.lastHitFrame) {
+    state.missStreak = (state.missStreak || 0) + 1;
+  } else {
+    state.missStreak = 0;
+  }
+
   let target = pickTarget(botPlayer, state.mode, state);
   if (!target || !target.alive || target.hp <= 0) {
     const fallback = getAliveOpponents(botPlayer);
@@ -1983,6 +2010,7 @@ function assignBotsFromNames() {
       nextFireFrame: frameCount + 120 + Math.floor(Math.random() * 120),
       angleBias: 0,
       powerBias: 0,
+      missStreak: 0,
       lastHitFrame: -99999,
       lastShotFrame: -99999,
       lastTargetId: null,
@@ -1997,7 +2025,7 @@ function assignBotsFromNames() {
 // ══════════════════════════════════════════════════════════════
 function setupPlayerNameFields() {
   const n = parseInt(DOM.numPlayers.value) || 6;
-  const p_tpyes = ["", "s", " [easy]", " [medium]", " [hard]", " [god]"]
+  const p_tpyes = ["", " [easy]", " [easy]", " [medium]", " [hard]", " [god]"]
   DOM.playerNameFields.innerHTML = '';
   for (let i = 0; i < n; i++) {
     const div = document.createElement('div');
