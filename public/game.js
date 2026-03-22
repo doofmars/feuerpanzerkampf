@@ -48,9 +48,9 @@ const GAME_LOOP_FPS = 30;
 const GAME_LOOP_STEP_MS = 1000 / GAME_LOOP_FPS;
 const GAME_LOOP_MAX_CATCHUP_STEPS = 3;
 const BOT_AIM_VARIANCE = {
-  easy: 14,
-  medium: 8,
-  hard: 5,
+  easy: 26,
+  medium: 10,
+  hard: 4,
   expert: 0,
   god: 0,
 };
@@ -700,6 +700,10 @@ function dealDamage(attackerId, targetId, amount) {
   } else {
     // Earn 1€ per HP damage dealt to an opponent
     if (attacker) attacker.money += actual;
+    if (attacker?.bot) {
+      attacker.bot.lastHitFrame = frameCount;
+      attacker.bot.hasConfirmedHit = true;
+    }
   }
 
   if (target.hp <= 0) {
@@ -1260,8 +1264,20 @@ function updateHUD() {
 //  SHOP
 // ══════════════════════════════════════════════════════════════
 function openShop(playerIdx) {
-  shopPlayerIdx = playerIdx;
-  const p = players[playerIdx];
+  let idx = playerIdx;
+  while (idx < players.length && players[idx]?.bot) {
+    runBotShop(players[idx]);
+    idx++;
+  }
+
+  if (idx >= players.length) {
+    closeShop();
+    startRound();
+    return;
+  }
+
+  shopPlayerIdx = idx;
+  const p = players[idx];
   if (!p) { closeShop(); return; }
 
   DOM.shopBalanceText.textContent = `Player: ${p.name}  |  Balance: ${p.money}€`;
@@ -1298,12 +1314,7 @@ function openShop(playerIdx) {
   // "Done" advances to next player or closes shop
   DOM.btnShopDone.onclick = () => {
     const nextIdx = shopPlayerIdx + 1;
-    if (nextIdx < players.length) {
-      openShop(nextIdx);
-    } else {
-      closeShop();
-      startRound();
-    }
+    openShop(nextIdx);
   };
 }
 
@@ -1420,46 +1431,286 @@ function update() {
 }
 
 function getAliveOpponents(botPlayer) {
-  return players.filter(p => p.alive && p.id !== botPlayer.id);
+  return players.filter(p =>
+    p.id !== botPlayer.id &&
+    p.alive &&
+    p.hp > 0,
+  );
+}
+
+function pickNearestTarget(botPlayer) {
+  const opponents = getAliveOpponents(botPlayer);
+  if (opponents.length === 0) return null;
+  const cy = botPlayer.gy + TANK_H_CELLS / 2;
+  return opponents.reduce((best, p) => {
+    const py = p.gy + TANK_H_CELLS / 2;
+    const bd = Math.hypot(best.gx - botPlayer.gx, (best.gy + TANK_H_CELLS / 2) - cy);
+    const pd = Math.hypot(p.gx - botPlayer.gx, py - cy);
+    return pd < bd ? p : best;
+  }, opponents[0]);
 }
 
 function pickTarget(botPlayer, mode) {
   const opponents = getAliveOpponents(botPlayer);
   if (opponents.length === 0) return null;
-  if (mode === 'hard') {
-    return opponents.reduce((m, p) => p.hp < m.hp ? p : m, opponents[0]);
+  if (mode === 'easy') {
+    return opponents[Math.floor(Math.random() * opponents.length)];
+  }
+  if (mode === 'medium' || mode === 'hard' || mode === 'expert' || mode === 'god') {
+    return pickNearestTarget(botPlayer);
   }
   return opponents[0];
+}
+
+function clamp(min, v, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function solveBallisticShot(botPlayer, target, weaponKey) {
+  const def = WEAPONS[weaponKey] || WEAPONS.cannonball;
+  const g = def.gravity;
+  const sx = botPlayer.gx;
+  const sy = botPlayer.gy + TANK_H_CELLS / 2;
+  const tx = target.gx;
+  const ty = target.gy + TANK_H_CELLS / 2;
+  const x = target.gx - botPlayer.gx;
+  const y = sy - ty;
+  const absX = Math.abs(x);
+
+  // If target is almost vertical, use a high arc with moderate power.
+  if (absX < 1.2) {
+    return {
+      angle: y >= 0 ? 90 : 82,
+      power: clamp(7, 10.5, MAX_POWER),
+    };
+  }
+
+  // Brute-force from low to high speed to get near-minimum power perfect-ish shots.
+  const maxSpeed = MAX_POWER * def.powerScale;
+  for (let v = 6.5 * def.powerScale; v <= maxSpeed; v += 0.2) {
+    if (g <= 0) {
+      const dy = (target.gy + TANK_H_CELLS / 2) - (botPlayer.gy + TANK_H_CELLS / 2);
+      const angleDirect = Math.atan2(-dy, x) * 180 / Math.PI;
+      const norm = angleDirect < 0 ? angleDirect + 180 : angleDirect;
+      return { angle: clamp(5, norm, 175), power: clamp(6, v / def.powerScale, MAX_POWER) };
+    }
+
+    const vv = v * v;
+    const disc = vv * vv - g * (g * absX * absX + 2 * y * vv);
+    if (disc < 0) continue;
+    const sqrtD = Math.sqrt(disc);
+
+    // Prefer lower arc for faster, flatter, and more stable god shots.
+    const tanTheta = (vv - sqrtD) / (g * absX);
+    if (!Number.isFinite(tanTheta)) continue;
+
+    let theta = Math.atan(tanTheta) * 180 / Math.PI; // 0..90
+    if (!Number.isFinite(theta)) continue;
+    theta = clamp(5, theta, 85);
+
+    const angle = x >= 0 ? theta : (180 - theta);
+    return {
+      angle: clamp(5, angle, 175),
+      power: clamp(6, v / def.powerScale, MAX_POWER),
+    };
+  }
+
+  // Numerical fallback: search for the best trajectory toward current target.
+  let best = {
+    err: Infinity,
+    angle: x >= 0 ? 45 : 135,
+    power: clamp(6, MAX_POWER * 0.75, MAX_POWER),
+  };
+
+  for (let power = 6; power <= MAX_POWER; power += 0.35) {
+    const v = power * def.powerScale;
+    for (let angle = 8; angle <= 172; angle += 1.5) {
+      if (x >= 0 && angle >= 90) continue;
+      if (x < 0 && angle <= 90) continue;
+
+      const rad = angle * Math.PI / 180;
+      const vx = v * Math.cos(rad);
+      const vy = -v * Math.sin(rad);
+      if (Math.abs(vx) < 0.001) continue;
+
+      const t = (tx - sx) / vx;
+      if (t <= 0) continue;
+
+      const yAt = sy + vy * t + 0.5 * g * t * t;
+      const err = Math.abs(yAt - ty);
+      if (err < best.err) {
+        best = { err, angle, power };
+      }
+      if (err <= 0.6) {
+        return {
+          angle: clamp(5, angle, 175),
+          power: clamp(6, power, MAX_POWER),
+        };
+      }
+    }
+  }
+
+  return {
+    angle: clamp(5, best.angle, 175),
+    power: clamp(6, best.power, MAX_POWER),
+  };
+}
+
+function chooseBotWeapon(botPlayer, state) {
+  const mode = state.mode;
+  if (mode === 'easy') return 'cannonball';
+
+  if (mode === 'medium') {
+    const occasionalSpecial = Math.random() < 0.22;
+    if (occasionalSpecial) {
+      const available = WEAPON_ORDER.filter(wk => wk !== 'cannonball' && botPlayer.weapons[wk] > 0);
+      if (available.length > 0) return available[Math.floor(Math.random() * available.length)];
+    }
+    return 'cannonball';
+  }
+
+  if (mode === 'hard' || mode === 'expert') {
+    if (state.hasConfirmedHit && botPlayer.weapons.rocket > 0) return 'rocket';
+    return 'cannonball';
+  }
+
+  if (mode === 'god') {
+    if (botPlayer.weapons.rocket > 0) return 'rocket';
+    return 'cannonball';
+  }
+
+  return 'cannonball';
+}
+
+function estimateBotAim(botPlayer, target, state, weaponKey) {
+  const botCy = botPlayer.gy + TANK_H_CELLS / 2;
+  const targetCy = target.gy + TANK_H_CELLS / 2;
+  const dx = target.gx - botPlayer.gx;
+  const absDx = Math.abs(dx);
+
+  if (state.mode === 'easy') {
+    return {
+      angle: clamp(5, 20 + Math.random() * 155, 175),
+      power: clamp(6, 6 + Math.random() * (MAX_POWER - 6), MAX_POWER),
+    };
+  }
+
+  if (state.mode === 'god') {
+    return solveBallisticShot(botPlayer, target, weaponKey);
+  }
+
+  // Point toward target then blend toward an arc (90°) for ballistic flight.
+  const direct = Math.atan2(botCy - targetCy, dx || 1) * 180 / Math.PI;
+  const arcLiftFactor = clamp(0.28, absDx / GRID_W + 0.25, 0.78);
+  let angle = direct + (90 - direct) * arcLiftFactor;
+  let power = clamp(7, 8 + absDx * 0.045 + Math.max(0, botCy - targetCy) * 0.03, MAX_POWER);
+
+  const variance = BOT_AIM_VARIANCE[state.mode] ?? 0;
+  angle += state.angleBias + (Math.random() * 2 - 1) * variance;
+  power += state.powerBias + (Math.random() * 2 - 1) * variance * 0.22;
+
+  if (weaponKey === 'rocket' && (state.mode === 'hard' || state.mode === 'expert' || state.mode === 'god')) {
+    power += 1.6; // stronger follow-up shot once hard bot locks on
+  }
+
+  return {
+    angle: clamp(5, angle, 175),
+    power: clamp(6, power, MAX_POWER),
+  };
+}
+
+function updateBotLearning(botPlayer, target, shot) {
+  const state = botPlayer.bot;
+  if (!state || !target) return;
+  if (state.mode === 'easy' || state.mode === 'god') return;
+
+  const dx = target.gx - botPlayer.gx;
+  const distanceFactor = clamp(0.6, Math.abs(dx) / 180, 2.2);
+  const missDirection = Math.random() < 0.5 ? -1 : 1;
+
+  // Nudge toward target over multiple shots but keep enough noise to miss often on medium.
+  const biasNudge = state.mode === 'hard' || state.mode === 'expert' ? 0.35 : 0.18;
+  state.angleBias += (dx > 0 ? -1 : 1) * missDirection * biasNudge;
+  state.powerBias += (dx > 0 ? 1 : -1) * biasNudge * 0.25 * distanceFactor;
+
+  if (state.lastHitFrame && frameCount - state.lastHitFrame < 90) {
+    state.angleBias *= 0.5;
+    state.powerBias *= 0.65;
+  } else {
+    const decay = state.mode === 'hard' || state.mode === 'expert' ? 0.9 : 0.8;
+    state.angleBias *= decay;
+    state.powerBias *= decay;
+  }
+}
+
+function runBotShop(botPlayer) {
+  if (!botPlayer?.bot || unlimitedAmmoMode) return;
+  const mode = botPlayer.bot.mode;
+
+  if (mode === 'easy') {
+    botPlayer.weaponIdx = 0;
+    return;
+  }
+
+  if (mode === 'medium') {
+    const purchasable = WEAPON_ORDER.filter(wk => wk !== 'cannonball' && wk !== 'shield');
+    let budget = botPlayer.money;
+    let tries = 8;
+    while (tries-- > 0 && budget >= 10) {
+      const wk = purchasable[Math.floor(Math.random() * purchasable.length)];
+      const w = WEAPONS[wk];
+      if (budget < w.cost) continue;
+      if (Math.random() < 0.45) continue;
+      botPlayer.weapons[wk]++;
+      budget -= w.cost;
+    }
+    botPlayer.money = budget;
+    return;
+  }
+
+  if (mode === 'hard' || mode === 'expert' || mode === 'god') {
+    const rocketCost = WEAPONS.rocket.cost;
+    while (botPlayer.money >= rocketCost) {
+      botPlayer.weapons.rocket++;
+      botPlayer.money -= rocketCost;
+      if (mode === 'hard' && botPlayer.weapons.rocket >= 12) break;
+      if (mode === 'expert' && botPlayer.weapons.rocket >= 18) break;
+    }
+  }
 }
 
 function fireBot(botPlayer) {
   const state = botPlayer.bot;
   if (!state || !botPlayer.canShoot || !botPlayer.alive) return;
-  const target = pickTarget(botPlayer, state.mode);
-  if (!target) return;
-
-  const dx = target.gx - botPlayer.gx;
-  const baseAngle = 90 - Math.atan2(target.gy - botPlayer.gy, dx) * 180 / Math.PI;
-  const basePower = Math.max(8, Math.min(MAX_POWER, Math.abs(dx) * 0.08 + 10));
-
-  const variance = BOT_AIM_VARIANCE[state.mode] ?? 0;
-  const fast = state.mode === 'god';
-  const adaptive = state.mode === 'medium' || state.mode === 'hard';
-  if (adaptive && state.lastErrorAngle != null) {
-    state.angleBias -= state.lastErrorAngle * (state.mode === 'hard' ? 0.35 : 0.2);
+  let target = pickTarget(botPlayer, state.mode);
+  if (!target || !target.alive || target.hp <= 0) {
+    const fallback = getAliveOpponents(botPlayer);
+    if (fallback.length === 0) return;
+    target = fallback[0];
   }
 
-  botPlayer.angle = Math.max(5, Math.min(175, baseAngle + state.angleBias + (Math.random() * 2 - 1) * variance));
-  botPlayer.power = state.mode === 'expert' || state.mode === 'god'
-    ? basePower
-    : Math.max(6, Math.min(MAX_POWER, basePower + (Math.random() * 2 - 1) * variance * 0.3));
+  const wk = chooseBotWeapon(botPlayer, state);
+  botPlayer.weaponIdx = Math.max(0, WEAPON_ORDER.indexOf(wk));
+  const shot = estimateBotAim(botPlayer, target, state, wk);
+  botPlayer.angle = shot.angle;
+  botPlayer.power = shot.power;
 
-  if (botPlayer.currentWeaponKey === 'laser' || botPlayer.currentWeaponKey === 'gunshot') {
+  if (wk === 'laser' || wk === 'gunshot') {
     botPlayer.power = MAX_POWER;
   }
+
   shootPlayer(botPlayer);
-  state.nextFireFrame = frameCount + (fast ? 20 : 120 + Math.floor(Math.random() * 80));
-  state.lastErrorAngle = (Math.random() * 2 - 1) * (variance * 0.15);
+  updateBotLearning(botPlayer, target, shot);
+
+  const cadenceByMode = {
+    easy: [120, 240],
+    medium: [90, 170],
+    hard: [55, 110],
+    expert: [35, 70],
+    god: [16, 28],
+  };
+  const [lo, hi] = cadenceByMode[state.mode] || [110, 180];
+  state.nextFireFrame = frameCount + lo + Math.floor(Math.random() * Math.max(1, hi - lo));
 }
 
 function updateBots() {
@@ -1668,7 +1919,9 @@ function assignBotsFromNames() {
       mode,
       nextFireFrame: frameCount + 120 + Math.floor(Math.random() * 120),
       angleBias: 0,
-      lastErrorAngle: 0,
+      powerBias: 0,
+      lastHitFrame: -99999,
+      hasConfirmedHit: false,
     };
     bots.push(p.id);
   }
