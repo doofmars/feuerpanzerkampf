@@ -1552,14 +1552,15 @@ function assignBotsFromNames() {
 //  LOBBY / SETUP
 // ══════════════════════════════════════════════════════════════
 function setupPlayerNameFields() {
-  const n = parseInt(DOM.numPlayers.value) || 2;
+  const n = parseInt(DOM.numPlayers.value) || 6;
+  const p_tpyes = ["", "s", " [easy]", " [medium]", " [hard]", " [god]"]
   DOM.playerNameFields.innerHTML = '';
   for (let i = 0; i < n; i++) {
     const div = document.createElement('div');
     div.className = 'player-name-entry';
     div.innerHTML = `
       <label>Player ${i+1} Name</label>
-      <input type="text" id="pname-${i}" value="Player ${i+1}" maxlength="14">`;
+      <input type="text" id="pname-${i}" value="Player ${i+1 +p_tpyes[i]}"  maxlength="14">`;
     DOM.playerNameFields.appendChild(div);
   }
 }
