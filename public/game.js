@@ -94,7 +94,7 @@ const WEAPONS = {
   },
   gunshot: {
     name:'Gun Shot', icon:'🔫', cost:50, unlimited:false,
-    type:'ballistic', gravity:GUN_GRAVITY, powerScale:2.2,
+    type:'ballistic', gravity:GUN_GRAVITY, powerScale:1.9,
     explodeR:7, damage:150, terrainDamage:true,
     desc:'High-speed flat trajectory',
   },
@@ -470,35 +470,78 @@ class Projectile {
     this.splitted  = false;
   }
 
+  getDirectHitPlayerAt(x, y) {
+    const gx = Math.round(x);
+    const gy = Math.round(y);
+    for (const p of players) {
+      if (!p.alive) continue;
+      // Avoid immediate self-collision right at muzzle exit.
+      if (p.id === this.ownerId && this.age <= 1) continue;
+      if (Math.abs(p.gx - gx) <= TANK_W_CELLS / 2 &&
+          Math.abs((p.gy + TANK_H_CELLS / 2) - gy) <= TANK_H_CELLS) {
+        return p;
+      }
+    }
+    return null;
+  }
+
   update() {
     this.trail.push({x: this.x, y: this.y});
     if (this.trail.length > 12) this.trail.shift();
     this.age++;
 
-    this.x  += this.vx;
-    this.y  += this.vy;
-    this.vy += this.weapon.gravity;
+    // Use sub-steps to avoid fast projectiles tunneling through terrain.
+    const stepCount = Math.max(1, Math.min(14, Math.ceil(Math.max(Math.abs(this.vx), Math.abs(this.vy)))));
+    const stepVx = this.vx / stepCount;
+    const stepVy = this.vy / stepCount;
 
-    // Side walls are solid
-    if (this.x < 0 || this.x >= GRID_W) {
-      this.alive = false;
-      triggerWeaponEffect(this.ownerId, this.weaponKey, this.x, Math.max(0, this.y));
-      onProjectileResolved(this.ownerId);
-      return;
+    for (let s = 0; s < stepCount; s++) {
+      this.x += stepVx;
+      this.y += stepVy;
+
+      // Side walls are solid
+      if (this.x < 0 || this.x >= GRID_W) {
+        this.alive = false;
+        triggerWeaponEffect(this.ownerId, this.weaponKey, this.x, Math.max(0, this.y));
+        onProjectileResolved(this.ownerId);
+        return;
+      }
+      // Bottom boundary explodes on floor impact
+      if (this.y >= GRID_H - 1) {
+        this.alive = false;
+        triggerWeaponEffect(this.ownerId, this.weaponKey, this.x, GRID_H - 1);
+        onProjectileResolved(this.ownerId);
+        return;
+      }
+      // Open ceiling: projectiles can leave and come back down
+      if (this.y < -TOP_ESCAPE_LIMIT) {
+        this.alive = false;
+        onProjectileResolved(this.ownerId);
+        return;
+      }
+
+      const hitPlayer = this.getDirectHitPlayerAt(this.x, this.y);
+      if (hitPlayer) {
+        this.alive = false;
+        const hitX = hitPlayer.gx;
+        const hitY = hitPlayer.gy + TANK_H_CELLS / 2;
+        triggerWeaponEffect(this.ownerId, this.weaponKey, hitX, hitY);
+        onProjectileResolved(this.ownerId);
+        return;
+      }
+
+      // Collision with terrain (TERRAIN or SNOW block projectiles; ACID does not)
+      const gx = Math.round(this.x), gy = Math.round(this.y);
+      const cell = getCell(gx, gy);
+      if (cell !== EMPTY && cell !== ACID) {
+        this.alive = false;
+        triggerWeaponEffect(this.ownerId, this.weaponKey, this.x, this.y);
+        onProjectileResolved(this.ownerId);
+        return;
+      }
     }
-    // Bottom boundary explodes on floor impact
-    if (this.y >= GRID_H - 1) {
-      this.alive = false;
-      triggerWeaponEffect(this.ownerId, this.weaponKey, this.x, GRID_H - 1);
-      onProjectileResolved(this.ownerId);
-      return;
-    }
-    // Open ceiling: projectiles can leave and come back down
-    if (this.y < -TOP_ESCAPE_LIMIT) {
-      this.alive = false;
-      onProjectileResolved(this.ownerId);
-      return;
-    }
+
+    this.vy += this.weapon.gravity;
 
     if (this.weaponKey === 'clusterbomb' && !this.splitted && this.age >= 26) {
       this.splitted = true;
@@ -515,14 +558,7 @@ class Projectile {
       return;
     }
 
-    // Collision with terrain (TERRAIN or SNOW block projectiles; ACID does not)
-    const gx = Math.round(this.x), gy = Math.round(this.y);
-    const cell = getCell(gx, gy);
-    if (cell !== EMPTY && cell !== ACID) {
-      this.alive = false;
-      triggerWeaponEffect(this.ownerId, this.weaponKey, this.x, this.y);
-      onProjectileResolved(this.ownerId);
-    }
+    // Terrain collision is handled in sub-steps above.
   }
 }
 
