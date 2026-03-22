@@ -45,6 +45,13 @@ const BEDROCK_WAVE_FREQ_1 = 0.07;
 const BEDROCK_WAVE_AMP_1 = 2;
 const BEDROCK_WAVE_FREQ_2 = 0.19;
 const BEDROCK_WAVE_AMP_2 = 1.2;
+const BOT_AIM_VARIANCE = {
+  easy: 14,
+  medium: 8,
+  hard: 5,
+  expert: 0,
+  god: 0,
+};
 
 // Player colors (body, highlight)
 const PLAYER_PALETTE = [
@@ -1341,10 +1348,7 @@ function fireBot(botPlayer) {
   const baseAngle = 90 - Math.atan2(target.gy - botPlayer.gy, dx) * 180 / Math.PI;
   const basePower = Math.max(8, Math.min(MAX_POWER, Math.abs(dx) * 0.08 + 10));
 
-  const variance = state.mode === 'easy' ? 14
-    : state.mode === 'medium' ? 8
-    : state.mode === 'hard' ? 5
-    : 0;
+  const variance = BOT_AIM_VARIANCE[state.mode] ?? 0;
   const fast = state.mode === 'god';
   const adaptive = state.mode === 'medium' || state.mode === 'hard';
   if (adaptive && state.lastErrorAngle != null) {
