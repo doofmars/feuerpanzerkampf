@@ -39,6 +39,8 @@ const CLUSTER_FRAGMENT_SPEED_RANGE = 0.9;
 const ACID_SPLASH_MIN_RADIUS = 6;
 const ACID_SPLASH_RADIUS_VARIANCE = 16;
 const ACID_DECAY_NEIGHBOR_PROBABILITY = 0.6;
+const SHIELD_DURATION_FRAMES = 60 * 5; // 5s
+const SHIELD_ACID_CLEAR_RADIUS = 12;
 
 // Player colors (body, highlight)
 const PLAYER_PALETTE = [
@@ -94,6 +96,12 @@ const WEAPONS = {
     explodeR:0, damage:0, terrainDamage:false,
     desc:'Splits mid-air into mini bombs',
   },
+  shield: {
+    name:'Shield', icon:'🛡️', cost:120, unlimited:false,
+    type:'shield', gravity:0, powerScale:0,
+    explodeR:0, damage:0, terrainDamage:false,
+    desc:'Temporary barrier, clears nearby acid',
+  },
   clusterFragment: {
     name:'Cluster Fragment', icon:'·', cost:0, unlimited:false,
     type:'ballistic', gravity:GRAVITY, powerScale:1.0,
@@ -101,7 +109,7 @@ const WEAPONS = {
     desc:'Internal',
   },
 };
-const WEAPON_ORDER = ['cannonball','rocket','acidbomb','snowball','gunshot','laser','clusterbomb'];
+const WEAPON_ORDER = ['cannonball','rocket','acidbomb','snowball','gunshot','laser','clusterbomb','shield'];
 
 // ══════════════════════════════════════════════════════════════
 //  STATE
@@ -381,8 +389,10 @@ class Player {
       gunshot: 3,
       laser: 0,
       clusterbomb: 0,
+      shield: 0,
     };
     this.weaponIdx = 0;      // index into WEAPON_ORDER
+    this.shieldUntilFrame = 0;
   }
 
   get currentWeaponKey() { return WEAPON_ORDER[this.weaponIdx]; }
@@ -641,6 +651,7 @@ function dealDamage(attackerId, targetId, amount) {
   const attacker = (attackerId !== null && attackerId !== undefined)
                    ? players[attackerId] : null;
   if (!target || !target.alive) return;
+  if (target.shieldUntilFrame > frameCount) return;
 
   const actual = Math.min(amount, target.hp);
   target.hp -= actual;
@@ -711,6 +722,11 @@ function updateAcidDamage() {
         const gx = p.gx - Math.floor(TANK_W_CELLS / 2) + dx;
         const gy = p.gy + dy;
         if (getCell(gx, gy) === ACID) {
+          if (p.shieldUntilFrame > frameCount) {
+            setCell(gx, gy, EMPTY);
+            hit = true;
+            continue;
+          }
           // Neutral environmental damage – acid burns, no money penalty
           dealDamage(null, p.id, ACID_DAMAGE);
           setCell(gx, gy, EMPTY); // acid decays after burning a player
@@ -720,6 +736,22 @@ function updateAcidDamage() {
           }
           hit = true;
         }
+      }
+    }
+  }
+}
+
+function activateShield(player) {
+  player.shieldUntilFrame = frameCount + SHIELD_DURATION_FRAMES;
+  const cx = player.gx;
+  const cy = player.gy + Math.floor(TANK_H_CELLS / 2);
+  const r2 = SHIELD_ACID_CLEAR_RADIUS * SHIELD_ACID_CLEAR_RADIUS;
+  for (let y = Math.max(0, cy - SHIELD_ACID_CLEAR_RADIUS); y <= Math.min(GRID_H - 1, cy + SHIELD_ACID_CLEAR_RADIUS); y++) {
+    for (let x = Math.max(0, cx - SHIELD_ACID_CLEAR_RADIUS); x <= Math.min(GRID_W - 1, cx + SHIELD_ACID_CLEAR_RADIUS); x++) {
+      const dx = x - cx, dy = y - cy;
+      if (dx * dx + dy * dy <= r2 && terrain[idx(x, y)] === ACID) {
+        terrain[idx(x, y)] = EMPTY;
+        terrainDirty = true;
       }
     }
   }
@@ -834,7 +866,10 @@ function shootPlayer(player) {
 
   player.canShoot = false;
 
-  if (def.type === 'laser') {
+  if (def.type === 'shield') {
+    activateShield(player);
+    onProjectileResolved(player.id);
+  } else if (def.type === 'laser') {
     fireLaser(player);
     // Laser resolves instantly
     onProjectileResolved(player.id);
@@ -945,6 +980,18 @@ function renderPlayers() {
       ctx.fillRect(bx, by + bh + 12, bw, 3);
       ctx.fillStyle = '#f0c040';
       ctx.fillRect(bx, by + bh + 12, pw, 3);
+    }
+
+    if (p.shieldUntilFrame > frameCount) {
+      ctx.save();
+      const radius = Math.max(bw, bh) * 0.95;
+      const alpha = 0.35 + 0.2 * Math.sin(frameCount * 0.25);
+      ctx.strokeStyle = `rgba(120,200,255,${alpha.toFixed(2)})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
   }
 }
@@ -1076,6 +1123,9 @@ function updateHUD() {
       const wk   = p.currentWeaponKey;
       const ammo = p.weapons[wk] === Infinity ? '∞' : p.weapons[wk];
       wpnSpan.textContent = `${WEAPONS[wk].icon} ${WEAPONS[wk].name} ×${ammo}`;
+    }
+    if (p.shieldUntilFrame > frameCount) {
+      panel.classList.add('active');
     }
   }
 }
