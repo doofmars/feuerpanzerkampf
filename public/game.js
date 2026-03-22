@@ -47,6 +47,7 @@ const BEDROCK_WAVE_AMP_2 = 1.2;
 const GAME_LOOP_FPS = 30;
 const GAME_LOOP_STEP_MS = 1000 / GAME_LOOP_FPS;
 const GAME_LOOP_MAX_CATCHUP_STEPS = 3;
+const BOT_FIRST_SHOT_DELAY_FRAMES = GAME_LOOP_FPS * 2;
 const GOD_REFOCUS_FRAMES = 55;
 const EXPERT_REFOCUS_FRAMES = 140;
 const BOT_MIN_POWER = 1.4;
@@ -142,6 +143,7 @@ let acidPending = [];   // {gx,gy} cells to become acid (spawned this frame)
 let phase = 'lobby';    // lobby | playing | roundEnd | shop
 let roundNum  = 0;
 let frameCount = 0;
+let roundStartFrame = 0;
 let gameOver  = false;
 let shopPlayerIdx = 0;
 let bots = [];
@@ -1370,6 +1372,7 @@ function closeShop() {
 function startRound() {
   roundNum++;
   phase = 'playing';
+  roundStartFrame = frameCount;
   projectiles = [];
   laserBeams  = [];
   explosionFx = [];
@@ -1805,6 +1808,7 @@ function fireBot(botPlayer) {
 
 function updateBots() {
   if (phase !== 'playing') return;
+  if (frameCount < roundStartFrame + BOT_FIRST_SHOT_DELAY_FRAMES) return;
   for (const p of players) {
     if (!p.bot || !p.alive) continue;
     if (frameCount >= p.bot.nextFireFrame) fireBot(p);
@@ -1924,6 +1928,7 @@ function handleRemoteEvent(evt) {
         p.snapToTerrain();
       }
       phase = 'playing';
+      roundStartFrame = frameCount;
       roundNum = evt.roundNum;
       showBanner(`Round ${roundNum}`, 1800);
       break;
@@ -1969,6 +1974,7 @@ function startOnlineGame(seed, playerData) {
 function startRoundWithSeed(seed) {
   roundNum++;
   phase = 'playing';
+  roundStartFrame = frameCount;
   projectiles = [];
   laserBeams  = [];
   explosionFx = [];
