@@ -796,8 +796,12 @@ function processInput() {
     const binds = PLAYER_KEYS[localIdx];
 
     // Rotate cannon
+    const oldAngle = player.angle;
     if (keys[binds.left])  player.angle = Math.min(175, player.angle + ANGLE_SPEED);
     if (keys[binds.right]) player.angle = Math.max(5,   player.angle - ANGLE_SPEED);
+    if (isOnline && player.angle !== oldAngle) {
+      socket.emit('gameEvent', { type: 'angleChange', playerId: player.id, angle: player.angle });
+    }
 
     // Cycle weapon
     if (justPressed(binds.prevWeapon)) cycleWeapon(player, -1);
@@ -849,10 +853,23 @@ function cycleWeapon(player, dir) {
   updateHUD();
 }
 
-function shootPlayer(player) {
+function shootPlayer(player, fromRemote = false) {
   if (!player.canShoot) return;
   const wk  = player.currentWeaponKey;
   const def = WEAPONS[wk];
+
+  if (!fromRemote && isOnline && !isHost) {
+    // Client-controlled player asks host to execute the authoritative shot
+    player.canShoot = false;
+    socket.emit('gameEvent', {
+      type: 'shootRequest',
+      playerId: player.id,
+      weaponKey: wk,
+      angle: player.angle,
+      power: player.power,
+    });
+    return;
+  }
 
   // Check ammo
   if (!def.unlimited && player.weapons[wk] <= 0) {
@@ -1261,6 +1278,17 @@ function update() {
   // Sand physics (every frame)
   if (frameCount % SAND_EVERY === 0) updateSandPhysics();
 
+  if (isOnline && isHost && frameCount % 2 === 0 && terrainSyncShadow) {
+    const diffs = [];
+    for (let i = 0; i < terrain.length; i++) {
+      if (terrain[i] !== terrainSyncShadow[i]) {
+        diffs.push([i, terrain[i]]);
+        terrainSyncShadow[i] = terrain[i];
+      }
+    }
+    if (diffs.length > 0) socket.emit('terrainDiff', diffs);
+  }
+
   // Re-snap players to terrain (tanks sit on top)
   for (const p of players) {
     if (p.alive) p.snapToTerrain();
@@ -1392,12 +1420,32 @@ function handleRemoteEvent(evt) {
       if (p) p.angle = evt.angle;
       break;
     }
+    case 'shootRequest': {
+      if (!isHost) break;
+      const p = players[evt.playerId];
+      if (!p || !p.alive) break;
+      p.angle = evt.angle;
+      p.power = evt.power;
+      p.canShoot = true;
+      p.weaponIdx = Math.max(0, WEAPON_ORDER.indexOf(evt.weaponKey));
+      shootPlayer(p, true);
+      break;
+    }
     case 'shoot': {
       const p = players[evt.playerId];
       if (!p || !p.alive) break;
       p.angle = evt.angle;
       p.power = evt.power;
-      shootPlayer(p);
+      p.canShoot = true;
+      p.weaponIdx = Math.max(0, WEAPON_ORDER.indexOf(evt.weaponKey));
+      if (isHost) break;
+      shootPlayer(p, true);
+      break;
+    }
+    case 'terrainDiff': {
+      if (!evt.diffs) break;
+      for (const [i, v] of evt.diffs) terrain[i] = v;
+      terrainDirty = true;
       break;
     }
     case 'roundStart': {
