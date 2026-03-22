@@ -504,8 +504,9 @@ class Projectile {
       for (let i = 0; i < 7; i++) {
         const ang = (-Math.PI * 0.75) + (i / 6) * (Math.PI * 1.5);
         const spd = CLUSTER_FRAGMENT_MIN_SPEED + Math.random() * CLUSTER_FRAGMENT_SPEED_RANGE;
-        const fvx = Math.cos(ang) * spd;
-        const fvy = Math.sin(ang) * spd * 0.7;
+        // Inherit parent momentum and add radial split impulse.
+        const fvx = this.vx + Math.cos(ang) * spd;
+        const fvy = this.vy + Math.sin(ang) * spd * 0.7;
         projectiles.push(new Projectile(this.ownerId, this.x, this.y, fvx, fvy, 'clusterFragment'));
       }
       this.alive = false;
