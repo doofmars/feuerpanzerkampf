@@ -38,7 +38,6 @@ const CLUSTER_FRAGMENT_MIN_SPEED = 2.1;
 const CLUSTER_FRAGMENT_SPEED_RANGE = 0.9;
 const ACID_SPLASH_MIN_RADIUS = 6;
 const ACID_SPLASH_RADIUS_VARIANCE = 16;
-const ACID_DECAY_NEIGHBOR_PROBABILITY = 0.6;
 const SHIELD_DURATION_FRAMES = 60 * 5; // 5s
 const SHIELD_ACID_CLEAR_RADIUS = 12;
 const BEDROCK_WAVE_FREQ_1 = 0.07;
@@ -337,12 +336,14 @@ function updateSandPhysics() {
       const gx = leftFirst ? xi : GRID_W - 1 - xi;
       const cell = terrain[idx(gx, gy)];
       if (cell === EMPTY) continue;
+      let moved = false;
 
       // Try to fall straight down
       if (terrain[idx(gx, gy+1)] === EMPTY) {
         terrain[idx(gx, gy+1)] = cell;
         terrain[idx(gx, gy)]   = EMPTY;
         terrainDirty = true;
+        moved = true;
       } else {
         // Try diagonal
         const dxA = leftFirst ? -1 :  1;
@@ -352,15 +353,17 @@ function updateSandPhysics() {
           terrain[idx(nx0, gy+1)] = cell;
           terrain[idx(gx,  gy)]   = EMPTY;
           terrainDirty = true;
+          moved = true;
         } else if (nx1 >= 0 && nx1 < GRID_W && terrain[idx(nx1, gy+1)] === EMPTY) {
           terrain[idx(nx1, gy+1)] = cell;
           terrain[idx(gx,  gy)]   = EMPTY;
           terrainDirty = true;
+          moved = true;
         }
       }
 
       // Extra lateral flow for acid when resting on solid ground
-      if (cell === ACID && terrain[idx(gx, gy+1)] !== EMPTY) {
+      if (cell === ACID && !moved) {
         const left = gx - 1, right = gx + 1;
         const chooseLeft = ((gx + gy + frameCount) & 1) === 0;
         const nxA = chooseLeft ? left : right;
@@ -379,7 +382,9 @@ function updateSandPhysics() {
   }
 
   // Apply any pending acid spawns
-  for (const {gx, gy} of acidPending) setCell(gx, gy, ACID);
+  for (const {gx, gy} of acidPending) {
+    if (getCell(gx, gy) === EMPTY) setCell(gx, gy, ACID);
+  }
   acidPending = [];
 }
 
@@ -575,14 +580,23 @@ function triggerWeaponEffect(ownerId, weaponKey, gx, gy) {
 
     case 'acidbomb': {
       // No explosion: just an acid splash cloud
-      const count = 55;
-      for (let i = 0; i < count; i++) {
+      const count = 200;
+      const chosen = new Set();
+      let attempts = 0;
+
+      while (chosen.size < count && attempts < count * 12) {
+        attempts++;
         const ang = (Math.random() * Math.PI * 2);
         const r   = ACID_SPLASH_MIN_RADIUS + Math.random() * ACID_SPLASH_RADIUS_VARIANCE;
         const ax  = Math.round(gx + Math.cos(ang) * r);
         const ay  = Math.round(gy + Math.sin(ang) * r * 0.5);
-        if (ax >= 0 && ax < GRID_W && ay >= 0 && ay < GRID_H)
-          acidPending.push({ gx: ax, gy: ay });
+        if (ax < 0 || ax >= GRID_W || ay < 0 || ay >= GRID_H) continue;
+        if (getCell(ax, ay) !== EMPTY) continue;
+
+        const cellIndex = idx(ax, ay);
+        if (chosen.has(cellIndex)) continue;
+        chosen.add(cellIndex);
+        acidPending.push({ gx: ax, gy: ay });
       }
       explosionFx.push({ gx: Math.round(gx), gy: Math.round(gy), r: 0, maxR: 30,
         t: 1.0, color: '#40ff40' });
@@ -751,11 +765,7 @@ function updateAcidDamage() {
           }
           // Neutral environmental damage – acid burns, no money penalty
           dealDamage(null, p.id, ACID_DAMAGE);
-          setCell(gx, gy, EMPTY); // acid decays after burning a player
-          // consume a little nearby acid too for faster cleanup
-          if (Math.random() < ACID_DECAY_NEIGHBOR_PROBABILITY) {
-            setCell(gx + (Math.random() < 0.5 ? -1 : 1), gy, EMPTY);
-          }
+          setCell(gx, gy, EMPTY); // particle is consumed on contact
           hit = true;
         }
       }
